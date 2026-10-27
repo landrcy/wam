@@ -59,7 +59,6 @@ function pressJ() {
   const u = activeUnit(); if (!u) return;
   if (mechOf(u) !== 'bow') return strike();
   if (B.cd > 0) return;
-  if (ADM.perfect) B.mk = B.zc;
   if (!B.drawing) { B.drawing = true; B.drawT = B.t; B.tapMode = false; B.over = 0; B.mk = 0; SFX.click(); }
   else if (B.tapMode) bowRelease();
 }
@@ -113,11 +112,13 @@ function strike() {
   if (!B || B.state !== 'fight' || B.paused) return;
   const u = activeUnit(); if (!u) return;
   if (B.cd > 0) return;
+  if (ADM.perfect) B.mk = B.zc;
   const { g, p } = zones(), d = aimD(), mech = mechOf(u);
   if (mech === 'bow' && !B.drawing) return;
   const bv = unitBar(u);
-  let q = d <= p / 2 ? 'perfect' : d <= g / 2 ? 'good' : 'miss', ward = false;
-  if (bv === 'twin' && q !== 'perfect' && Math.abs(B.mk - B.zc2) <= p / 2) q = 'perfect';
+  const d2 = bv === 'twin' ? Math.abs(B.mk - B.zc2) : 9; // twin: the second sweet spot is a full second target (perfect band + good ring)
+  const dd = Math.min(d, d2);
+  let q = dd <= p / 2 + .004 ? 'perfect' : (d <= g / 2 || d2 <= g / 3) ? 'good' : 'miss', ward = false;
   if (mech === 'bow') { B.drawing = false; B.tapMode = false; SFX.click(); }
   if (mech === 'rune' && q !== 'miss') {
     B.runeQ.push(q);

@@ -91,7 +91,7 @@ function backBtn() { btn(8, 292, 70, 22, 'Back', () => goto('camp')); }
 // ---------- title ----------
 function drawTitle() {
   drawArena('#f4f4f4');
-  T('W.A.M.', 160, 54, '#ffffff', 4, 'c', '#24242c'); hit(80, 50, 160, 40, adminTap);
+  { let S = 4; while (S > 2 && logoW(S) > 296) S--; bigTitle(66, S); }
   const bob = Math.floor(gtime * 2) % 2;
   rect(160 - 22, 196, 44, 3, '#16161c');
   drawChar(save.chars[save.party[0]], 160 - 30, 136 - bob, 5);
@@ -155,11 +155,11 @@ function buildLogo(S) {
   g.fillStyle = '#ffe9a0'; g.fillRect(x0, uy - 1, 1, 1); g.fillRect(x0 + 14, uy - 4, 1, 1);
   return { c, S, mask: M, W, H };
 }
-function bigTitle() {
-  const S = logoScale(); if (!S) return; // no room above the box: no logo rather than overlapping
+function bigTitle(inCy, inS) {
+  const S = inS || logoScale(); if (!S) return; // no room above the box: no logo rather than overlapping
   if (!logoBuf || logoBuf.S !== S) logoBuf = buildLogo(S);
   const L = logoBuf, band = OY, bob = RM ? 0 : Math.round(Math.sin(gtime * .9) * 1);
-  const x = Math.round(160 - L.W / 2), y = Math.round(-band / 2 - L.H / 2) + bob;
+  const x = Math.round(160 - L.W / 2), y = Math.round((inCy !== undefined ? inCy : -band / 2) - L.H / 2) + bob;
   ctx.drawImage(L.c, x, y); hit(x, y, L.W, L.H, adminTap);
   if (!RM) { // occasional glint: a thin diagonal light sweeps across the letters every ~6s
     const ph = (gtime % 6.5) / 1.1; if (ph < 1) { const gx = Math.round(-10 + ph * (L.W + 20)); ctx.globalAlpha = .7;
@@ -401,8 +401,6 @@ function drawSkills() {
   ctx.restore();
   // drag to pan; wheel or buttons to zoom
   UI.unshift({ x: cx0, y: cy0, w: cw, h: ch, fn: () => {}, drag: true });
-  const zy = treeZY; btn(282, zy, 14, 14, '+', () => treeZoom(1), { dis: v.zi >= ZOOMS.length - 1 }); btn(298, zy, 14, 14, '-', () => treeZoom(-1), { dis: v.zi <= 0 });
-  btn(230, zy, 48, 14, 'center', () => { v.x = 0; v.y = -60; SFX.click(); });
   // tooltip in the game font
   T(charName(c) + '  Lv ' + c.lvl, 8, 28, COL.white, 1, 'l', '#000');
   bar(8, 40, 90, 2, c.xp / xpNeed(c.lvl), COL.blue);
@@ -428,6 +426,8 @@ function drawSkills() {
     T('Each fork: pick one path for good.', 12, 245, COL.dim);
     T(TOUCH ? 'Drag to look, tap a node.' : 'Drag or scroll, click a node.', 12, 258, COL.dark);
   }
+  const zy = treeZY; btn(282, zy, 14, 14, '+', () => treeZoom(1), { dis: v.zi >= ZOOMS.length - 1 }); btn(298, zy, 14, 14, '-', () => treeZoom(-1), { dis: v.zi <= 0 });
+  btn(230, zy, 48, 14, 'center', () => { v.x = 0; v.y = -60; SFX.click(); });
   backBtn();
 }
 // ---------- party / evolution ----------

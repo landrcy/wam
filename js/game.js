@@ -33,7 +33,7 @@ const TUNE = {
   autoCdMul: 1.7,         // allies auto-attack this much slower than their cooldown
   autoDmgMul: 0.6,        // allies' auto attack damage
   foeHp: 40, foeHpGrow: 1.6,
-  soloHp: 0.55, soloDmg: 0.8, soloCls: { warrior: [1, 1], archer: [.88, .66], mage: [.8, .55] }, // [foe hp, foe dmg] per class: squishy heroes get gentler foes // solo hero: one character fights alone, so foes are trimmed to keep the same challenge
+  soloHp: 0.55, soloDmg: 0.8, soloCls: { warrior: [1, 1], archer: [.82, .6], mage: [.8, .55] }, // [foe hp, foe dmg] per class: squishy heroes get gentler foes // solo hero: one character fights alone, so foes are trimmed to keep the same challenge
   foeDmg: 12, foeDmgGrow: 1.5,
   foeRate: 0.64,          // foe attack period multiplier (lower = more often)
   bossHp: 1.8,            // extra boss life
@@ -1509,7 +1509,6 @@ function pressJ() {
   const u = activeUnit(); if (!u) return;
   if (mechOf(u) !== 'bow') return strike();
   if (B.cd > 0) return;
-  if (ADM.perfect) B.mk = B.zc;
   if (!B.drawing) { B.drawing = true; B.drawT = B.t; B.tapMode = false; B.over = 0; B.mk = 0; SFX.click(); }
   else if (B.tapMode) bowRelease();
 }
@@ -1563,11 +1562,13 @@ function strike() {
   if (!B || B.state !== 'fight' || B.paused) return;
   const u = activeUnit(); if (!u) return;
   if (B.cd > 0) return;
+  if (ADM.perfect) B.mk = B.zc;
   const { g, p } = zones(), d = aimD(), mech = mechOf(u);
   if (mech === 'bow' && !B.drawing) return;
   const bv = unitBar(u);
-  let q = d <= p / 2 ? 'perfect' : d <= g / 2 ? 'good' : 'miss', ward = false;
-  if (bv === 'twin' && q !== 'perfect' && Math.abs(B.mk - B.zc2) <= p / 2) q = 'perfect';
+  const d2 = bv === 'twin' ? Math.abs(B.mk - B.zc2) : 9; // twin: the second sweet spot is a full second target (perfect band + good ring)
+  const dd = Math.min(d, d2);
+  let q = dd <= p / 2 + .004 ? 'perfect' : (d <= g / 2 || d2 <= g / 3) ? 'good' : 'miss', ward = false;
   if (mech === 'bow') { B.drawing = false; B.tapMode = false; SFX.click(); }
   if (mech === 'rune' && q !== 'miss') {
     B.runeQ.push(q);
@@ -2293,7 +2294,7 @@ function updateBoss(dt) {
   updateBossMove(bo, dt); admBossPhase(bo);
   if (bo.st === 'fight' && !f.dead) {
     const pat = bossPat() || {};
-    if (pat.drift && B.state === 'fight') B.zc = clamp(B.zBase + Math.sin(B.t * 1.6) * pat.drift, .12, .88);
+    if (pat.drift && B.state === 'fight') { const nz = clamp(B.zBase + Math.sin(B.t * 1.6) * pat.drift, .12, .88); if (B.zc2 !== undefined) B.zc2 = clamp(B.zc2 + nz - B.zc, .08, .96); B.zc = nz; }
     if (pat.rev && B.state === 'fight') { B.revT = (B.revT || 1) - dt; if (B.revT <= 0) { B.md *= -1; B.revT = rnd(.7, 1.5); } }
     if (f.dbl > 0) { f.dbl -= dt; if (f.dbl <= 0) { f.dbl = 0; foeAttack(f, true); } }
     if (Math.random() < .6) { const [cx, cy] = foeCenter(f); B.parts.push({ x: cx + rnd(-70, 70), y: cy + rnd(-50, 110), vx: rnd(-8, 8), vy: rnd(-40, -15), t: 0, life: rnd(.4, .9), col: bo.phase ? bo.D.crack : '#3a3444', s: Math.random() < .3 ? 2 : 1, g: -10 }); }
@@ -2656,7 +2657,7 @@ function backBtn() { btn(8, 292, 70, 22, 'Back', () => goto('camp')); }
 // ---------- title ----------
 function drawTitle() {
   drawArena('#f4f4f4');
-  T('W.A.M.', 160, 54, '#ffffff', 4, 'c', '#24242c'); hit(80, 50, 160, 40, adminTap);
+  { let S = 4; while (S > 2 && logoW(S) > 296) S--; bigTitle(66, S); }
   const bob = Math.floor(gtime * 2) % 2;
   rect(160 - 22, 196, 44, 3, '#16161c');
   drawChar(save.chars[save.party[0]], 160 - 30, 136 - bob, 5);
@@ -2720,11 +2721,11 @@ function buildLogo(S) {
   g.fillStyle = '#ffe9a0'; g.fillRect(x0, uy - 1, 1, 1); g.fillRect(x0 + 14, uy - 4, 1, 1);
   return { c, S, mask: M, W, H };
 }
-function bigTitle() {
-  const S = logoScale(); if (!S) return; // no room above the box: no logo rather than overlapping
+function bigTitle(inCy, inS) {
+  const S = inS || logoScale(); if (!S) return; // no room above the box: no logo rather than overlapping
   if (!logoBuf || logoBuf.S !== S) logoBuf = buildLogo(S);
   const L = logoBuf, band = OY, bob = RM ? 0 : Math.round(Math.sin(gtime * .9) * 1);
-  const x = Math.round(160 - L.W / 2), y = Math.round(-band / 2 - L.H / 2) + bob;
+  const x = Math.round(160 - L.W / 2), y = Math.round((inCy !== undefined ? inCy : -band / 2) - L.H / 2) + bob;
   ctx.drawImage(L.c, x, y); hit(x, y, L.W, L.H, adminTap);
   if (!RM) { // occasional glint: a thin diagonal light sweeps across the letters every ~6s
     const ph = (gtime % 6.5) / 1.1; if (ph < 1) { const gx = Math.round(-10 + ph * (L.W + 20)); ctx.globalAlpha = .7;
@@ -2966,8 +2967,6 @@ function drawSkills() {
   ctx.restore();
   // drag to pan; wheel or buttons to zoom
   UI.unshift({ x: cx0, y: cy0, w: cw, h: ch, fn: () => {}, drag: true });
-  const zy = treeZY; btn(282, zy, 14, 14, '+', () => treeZoom(1), { dis: v.zi >= ZOOMS.length - 1 }); btn(298, zy, 14, 14, '-', () => treeZoom(-1), { dis: v.zi <= 0 });
-  btn(230, zy, 48, 14, 'center', () => { v.x = 0; v.y = -60; SFX.click(); });
   // tooltip in the game font
   T(charName(c) + '  Lv ' + c.lvl, 8, 28, COL.white, 1, 'l', '#000');
   bar(8, 40, 90, 2, c.xp / xpNeed(c.lvl), COL.blue);
@@ -2993,6 +2992,8 @@ function drawSkills() {
     T('Each fork: pick one path for good.', 12, 245, COL.dim);
     T(TOUCH ? 'Drag to look, tap a node.' : 'Drag or scroll, click a node.', 12, 258, COL.dark);
   }
+  const zy = treeZY; btn(282, zy, 14, 14, '+', () => treeZoom(1), { dis: v.zi >= ZOOMS.length - 1 }); btn(298, zy, 14, 14, '-', () => treeZoom(-1), { dis: v.zi <= 0 });
+  btn(230, zy, 48, 14, 'center', () => { v.x = 0; v.y = -60; SFX.click(); });
   backBtn();
 }
 // ---------- party / evolution ----------
@@ -3161,7 +3162,7 @@ function drawAdmin() {
     aBtn(x0, y, 200, ADM.resetArm ? 'Sure? tap again' : 'Reset save', () => { if (!ADM.resetArm) { ADM.resetArm = 1; return; } ADM.resetArm = 0; localStorage.removeItem(SAVE_KEY); newSave(); B = null; ADM.ret = 'title'; scene = 'title'; }, { col: ADM.resetArm ? COL.red : COL.white });
     y += 24; wrap('Open with L, or tap the W.A.M. logo 5 times. Cheats are for testing; they are not saved.', 290).forEach(l => { T(l, x0, y, COL.dark); y += 11; });
   }
-  if (ADM.toast) { ADM.toast.t -= 1 / 60; if (ADM.toast.t <= 0) ADM.toast = null; else { const w = Math.min(296, textW(ADM.toast.s) + 16); panel(160 - w / 2, 290, w, 18, COL.gold); T(ADM.toast.s, 160, 295, COL.gold, 1, 'c'); } }
+  if (ADM.toast) { ADM.toast.t -= 1 / 60; if (ADM.toast.t <= 0) ADM.toast = null; else { let ts = ADM.toast.s; while (textW(ts) > 280) ts = ts.slice(0, -2) + '.'; const w = textW(ts) + 16; panel(160 - w / 2, 300, w, 14, COL.gold); T(ts, 160, 303, COL.gold, 1, 'c'); } }
 }
 function drawAdminOverlay(dt) {
   if (!ADM.overlay) return;
@@ -3591,6 +3592,7 @@ function drawAltBar(au, mech) {
     const band = (zc, col, hi) => { for (let t = zc - p / 2; t <= zc + p / 2; t += .004) { const [x, y] = bowPt(t); rect(x - 1 + sh, y - 2, 3, 4, col); rect(x + sh, y - 2, 1, 1, hi); } };
     if (!hidden) { band(B.zc, ready ? (pulse > .6 ? '#ffe27a' : COL.gold) : '#5a4a20', '#fff4b8'); if (bv === 'twin') band(B.zc2, ready ? '#ffd35a' : '#5a4a20', '#fff4b8'); }
     // target ring at the sweet spot
+    if (bv === 'twin' && !hidden) { const [t2x, t2y] = bowPt(B.zc2), gl = RM ? 1 : .6 + .4 * pulse; ctx.globalAlpha = gl * .35; ringPx(t2x + sh, t2y, 8, '#ffe27a'); ctx.globalAlpha = 1; ringPx(t2x + sh, t2y, 6, ready ? '#ffd35a' : '#3a3220'); ringPx(t2x + sh, t2y, 4, ready ? '#c07a1a' : '#2a2014'); rect(t2x - 1 + sh, t2y - 1, 2, 2, ready ? '#fff4b8' : '#4a4a54'); }
     const [tx, ty] = bowPt(B.zc); ringPx(tx + sh, ty, 6, ready ? '#7ee07e' : '#2a3a24'); ringPx(tx + sh, ty, 4, ready ? '#c03a2a' : '#3a1a14'); rect(tx - 1 + sh, ty - 1, 2, 2, ready ? '#ffffff' : '#4a4a54');
     if (bv === 'snipe' && ready) { ctx.globalAlpha = .6; rect(tx - 9 + sh, ty, 4, 1, '#ff5a5a'); rect(tx + 6 + sh, ty, 4, 1, '#ff5a5a'); rect(tx + sh, ty - 9, 1, 4, '#ff5a5a'); rect(tx + sh, ty + 6, 1, 4, '#ff5a5a'); ctx.globalAlpha = 1; }
     // the bow: wood limbs with grip and fletching tint, string pulled back with the draw

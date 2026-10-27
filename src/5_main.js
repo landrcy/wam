@@ -419,6 +419,7 @@ function drawAltBar(au, mech) {
     const band = (zc, col, hi) => { for (let t = zc - p / 2; t <= zc + p / 2; t += .004) { const [x, y] = bowPt(t); rect(x - 1 + sh, y - 2, 3, 4, col); rect(x + sh, y - 2, 1, 1, hi); } };
     if (!hidden) { band(B.zc, ready ? (pulse > .6 ? '#ffe27a' : COL.gold) : '#5a4a20', '#fff4b8'); if (bv === 'twin') band(B.zc2, ready ? '#ffd35a' : '#5a4a20', '#fff4b8'); }
     // target ring at the sweet spot
+    if (bv === 'twin' && !hidden) { const [t2x, t2y] = bowPt(B.zc2), gl = RM ? 1 : .6 + .4 * pulse; ctx.globalAlpha = gl * .35; ringPx(t2x + sh, t2y, 8, '#ffe27a'); ctx.globalAlpha = 1; ringPx(t2x + sh, t2y, 6, ready ? '#ffd35a' : '#3a3220'); ringPx(t2x + sh, t2y, 4, ready ? '#c07a1a' : '#2a2014'); rect(t2x - 1 + sh, t2y - 1, 2, 2, ready ? '#fff4b8' : '#4a4a54'); }
     const [tx, ty] = bowPt(B.zc); ringPx(tx + sh, ty, 6, ready ? '#7ee07e' : '#2a3a24'); ringPx(tx + sh, ty, 4, ready ? '#c03a2a' : '#3a1a14'); rect(tx - 1 + sh, ty - 1, 2, 2, ready ? '#ffffff' : '#4a4a54');
     if (bv === 'snipe' && ready) { ctx.globalAlpha = .6; rect(tx - 9 + sh, ty, 4, 1, '#ff5a5a'); rect(tx + 6 + sh, ty, 4, 1, '#ff5a5a'); rect(tx + sh, ty - 9, 1, 4, '#ff5a5a'); rect(tx + sh, ty + 6, 1, 4, '#ff5a5a'); ctx.globalAlpha = 1; }
     // the bow: wood limbs with grip and fletching tint, string pulled back with the draw

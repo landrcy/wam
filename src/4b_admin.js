@@ -88,7 +88,7 @@ function drawAdmin() {
     aBtn(x0, y, 200, ADM.resetArm ? 'Sure? tap again' : 'Reset save', () => { if (!ADM.resetArm) { ADM.resetArm = 1; return; } ADM.resetArm = 0; localStorage.removeItem(SAVE_KEY); newSave(); B = null; ADM.ret = 'title'; scene = 'title'; }, { col: ADM.resetArm ? COL.red : COL.white });
     y += 24; wrap('Open with L, or tap the W.A.M. logo 5 times. Cheats are for testing; they are not saved.', 290).forEach(l => { T(l, x0, y, COL.dark); y += 11; });
   }
-  if (ADM.toast) { ADM.toast.t -= 1 / 60; if (ADM.toast.t <= 0) ADM.toast = null; else { const w = Math.min(296, textW(ADM.toast.s) + 16); panel(160 - w / 2, 290, w, 18, COL.gold); T(ADM.toast.s, 160, 295, COL.gold, 1, 'c'); } }
+  if (ADM.toast) { ADM.toast.t -= 1 / 60; if (ADM.toast.t <= 0) ADM.toast = null; else { let ts = ADM.toast.s; while (textW(ts) > 280) ts = ts.slice(0, -2) + '.'; const w = textW(ts) + 16; panel(160 - w / 2, 300, w, 14, COL.gold); T(ts, 160, 303, COL.gold, 1, 'c'); } }
 }
 function drawAdminOverlay(dt) {
   if (!ADM.overlay) return;

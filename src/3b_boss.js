@@ -379,7 +379,7 @@ function updateBoss(dt) {
   updateBossMove(bo, dt); admBossPhase(bo);
   if (bo.st === 'fight' && !f.dead) {
     const pat = bossPat() || {};
-    if (pat.drift && B.state === 'fight') B.zc = clamp(B.zBase + Math.sin(B.t * 1.6) * pat.drift, .12, .88);
+    if (pat.drift && B.state === 'fight') { const nz = clamp(B.zBase + Math.sin(B.t * 1.6) * pat.drift, .12, .88); if (B.zc2 !== undefined) B.zc2 = clamp(B.zc2 + nz - B.zc, .08, .96); B.zc = nz; }
     if (pat.rev && B.state === 'fight') { B.revT = (B.revT || 1) - dt; if (B.revT <= 0) { B.md *= -1; B.revT = rnd(.7, 1.5); } }
     if (f.dbl > 0) { f.dbl -= dt; if (f.dbl <= 0) { f.dbl = 0; foeAttack(f, true); } }
     if (Math.random() < .6) { const [cx, cy] = foeCenter(f); B.parts.push({ x: cx + rnd(-70, 70), y: cy + rnd(-50, 110), vx: rnd(-8, 8), vy: rnd(-40, -15), t: 0, life: rnd(.4, .9), col: bo.phase ? bo.D.crack : '#3a3444', s: Math.random() < .3 ? 2 : 1, g: -10 }); }
