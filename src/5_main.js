@@ -256,7 +256,7 @@ function drawResult() {
     const n = Math.min(8, B.loot.length), sx = 160 - n * 13;
     B.loot.slice(0, 8).forEach((it, i) => drawItemCell(it, sx + i * 26, 144, 24, false, false));
     if (B.loot.length > 8) T('+' + (B.loot.length - 8), 270, 150, COL.dim, 1, 'r');
-  } else T('no loot this time', 160, 140, COL.dark, 1, 'c');
+  } else T('no loot this time', 160, 150, COL.dark, 1, 'c');
   if (!win) { T('Loot and XP are kept.', 160, 180, COL.dim, 1, 'c'); T('Gear up, spend points, try again.', 160, 193, COL.dim, 1, 'c'); }
   if (B.st <= 0) { if (Math.floor(gtime * 2) % 2 === 0) T(TOUCH ? 'tap to continue' : 'J to continue', 160, 218, COL.white, 1, 'c'); hit(0, 0, LW, LH, leaveBattle); }
 }
@@ -303,6 +303,8 @@ addEventListener('keydown', e => {
   audio();
   const k = e.code;
   if (k === 'KeyJ' || k === 'Space' || k === 'Enter') { e.preventDefault(); onJ(); return; }
+  if (k === 'KeyL') { e.preventDefault(); openAdmin(); return; }
+  if (scene === 'admin') { if (k === 'Escape') closeAdmin(); return; }
   if (k === 'KeyM') { save.mute = !save.mute; persist(); }
   if (scene === 'battle' && B) {
     if (k === 'Digit1' || k === 'Digit2' || k === 'Digit3') switchTo(+k.slice(5) - 1);
@@ -372,10 +374,12 @@ function loop(now) {
     else if (scene === 'skills') drawSkills();
     else if (scene === 'party') drawParty();
     else if (scene === 'select') drawSelect();
+    else if (scene === 'admin') drawAdmin();
     else if (scene === 'msg') drawMsg();
     else if (scene === 'battle' && B) drawBattle();
     drawStrip();
     if (scene === 'battle' && B) drawBossOverlay();
+    drawAdminOverlay(dt);
   } catch (err) { console.error(err); }
   requestAnimationFrame(loop);
 }

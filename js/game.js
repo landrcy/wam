@@ -1509,6 +1509,7 @@ function pressJ() {
   const u = activeUnit(); if (!u) return;
   if (mechOf(u) !== 'bow') return strike();
   if (B.cd > 0) return;
+  if (ADM.perfect) B.mk = B.zc;
   if (!B.drawing) { B.drawing = true; B.drawT = B.t; B.tapMode = false; B.over = 0; B.mk = 0; SFX.click(); }
   else if (B.tapMode) bowRelease();
 }
@@ -1682,7 +1683,7 @@ function hitFoe(f, dmg, info, u) {
   if (f.T.ghost && info.q === 'good') dmg *= .5;
   if (f.T.plated && info.q === 'good') dmg *= .6;
   dmg = Math.max(1, Math.round(dmg));
-  f.hp -= dmg; const isB = B.boss && B.boss.f === f; f.flash = isB ? (info.manual ? .06 : Math.max(f.flash, 0)) : .09;
+  if (ADM.ohk) dmg = Math.max(dmg, f.hp); f.hp -= dmg; const isB = B.boss && B.boss.f === f; f.flash = isB ? (info.manual ? .06 : Math.max(f.flash, 0)) : .09;
   const str = clamp(dmg / f.max * (isB ? 12 : 3), 0, 1); f.kx = Math.round((info.q === 'splash' ? 2 : 4) + str * (isB ? 6 : 16) + (info.q === 'perfect' ? 4 : 0));
   if (info.manual) B.shake = Math.max(B.shake, 1.5 + str * 6 + (info.crit ? 2 : 0));
   const [cx, cy] = foeCenter(f);
@@ -1755,7 +1756,7 @@ function foeHit(f) {
     let d = f.dmg * rnd(.9, 1.1) * (P.slam ? .7 : 1) * 30 / (30 + u.s.arm);
     if (P.dodge) { d *= .4; u.hop = .32; num(u.x - 10, u.y - 64, 'dodge', COL.green); }
     if (u.guard) { d *= .5; u.guard = 0; num(u.x, u.y - 64, 'guard', COL.blue); }
-    d = Math.max(1, Math.round(d)); u.hp -= d;
+    d = Math.max(1, Math.round(d)); if (ADM.god) d = 0; u.hp -= d;
     if (u.s.thorns && !f.dead) hitFoe(f, d * u.s.thorns * 2, { q: 'splash' }, u); u.hurt = .22; u.kb = Math.max(u.kb, P.dodge ? 2 : 7);
     num(u.x + rnd(-5, 5), u.y - 54, '-' + d, COL.red, d > u.max * .2 ? 2 : 1);
     for (let i = 0; i < 8; i++) spark(u.x, u.y - 24, i % 2 ? '#ff5a5a' : '#ffffff', 100);
@@ -2289,7 +2290,7 @@ function updateBoss(dt) {
     if (t > 1.4 && !ev.ref) { ev.ref = 1; bo.integ = 1; bossFlash('#ffffff', .3); SFX.reform(); }
     if (t > 1.9) bo.st = 'done';
   }
-  updateBossMove(bo, dt);
+  updateBossMove(bo, dt); admBossPhase(bo);
   if (bo.st === 'fight' && !f.dead) {
     const pat = bossPat() || {};
     if (pat.drift && B.state === 'fight') B.zc = clamp(B.zBase + Math.sin(B.t * 1.6) * pat.drift, .12, .88);
@@ -2562,6 +2563,7 @@ function drawBossOverlay() {
   }
   if (bo.flash) { const k = bo.flash.t / bo.flash.dur; ctx.globalAlpha = (1 - k) * (RM ? .2 : .75); ctx.fillStyle = bo.flash.col; ctx.fillRect(0, 0, VW, VH); ctx.globalAlpha = 1; }
 }
+let treeZY = 196;
 // ================= UI / scenes =================
 let scene = 'title', UI = [], mouse = { x: -1, y: -1 }, msgQueue = [], tab = 'warrior', selItem = null, selSkill = null, evoPick = null, confirmNew = 0, gtime = 0;
 // ---------- fantasy pixel frames: carved stone + gilded filigree ----------
@@ -2654,7 +2656,7 @@ function backBtn() { btn(8, 292, 70, 22, 'Back', () => goto('camp')); }
 // ---------- title ----------
 function drawTitle() {
   drawArena('#f4f4f4');
-  T('W.A.M.', 160, 54, '#ffffff', 4, 'c', '#24242c');
+  T('W.A.M.', 160, 54, '#ffffff', 4, 'c', '#24242c'); hit(80, 50, 160, 40, adminTap);
   const bob = Math.floor(gtime * 2) % 2;
   rect(160 - 22, 196, 44, 3, '#16161c');
   drawChar(save.chars[save.party[0]], 160 - 30, 136 - bob, 5);
@@ -2723,7 +2725,7 @@ function bigTitle() {
   if (!logoBuf || logoBuf.S !== S) logoBuf = buildLogo(S);
   const L = logoBuf, band = OY, bob = RM ? 0 : Math.round(Math.sin(gtime * .9) * 1);
   const x = Math.round(160 - L.W / 2), y = Math.round(-band / 2 - L.H / 2) + bob;
-  ctx.drawImage(L.c, x, y);
+  ctx.drawImage(L.c, x, y); hit(x, y, L.W, L.H, adminTap);
   if (!RM) { // occasional glint: a thin diagonal light sweeps across the letters every ~6s
     const ph = (gtime % 6.5) / 1.1; if (ph < 1) { const gx = Math.round(-10 + ph * (L.W + 20)); ctx.globalAlpha = .7;
       for (let j = 0; j < L.H; j++) for (let i = 0; i < 2; i++) { const px = gx + i - j / 2 | 0; if (L.mask(px, j)) { ctx.fillStyle = '#ffffff'; ctx.fillRect(x + px, y + j, 1, 1); } } ctx.globalAlpha = 1; } }
@@ -2734,7 +2736,7 @@ function drawCamp() {
   drawArena(ACTS[sa].c);
   bigTitle();
   T('Perfect ' + save.perfects, 8, 10, COL.gold);
-  btn(250, 6, 62, 16, save.mute ? 'Sound off' : 'Sound on', () => { save.mute = !save.mute; persist(); SFX.click(); }, { col: COL.dim });
+  btn(240, 6, 72, 16, save.mute ? 'Sound off' : 'Sound on', () => { save.mute = !save.mute; persist(); SFX.click(); }, { col: COL.dim });
   const showAct4 = save.cleared[8] || save.act4;
   for (let a = 0; a < (showAct4 ? 4 : 3); a++) {
     const y = 38 + a * 25, A = ACTS[a], open = a < 3 || save.act4;
@@ -2964,18 +2966,18 @@ function drawSkills() {
   ctx.restore();
   // drag to pan; wheel or buttons to zoom
   UI.unshift({ x: cx0, y: cy0, w: cw, h: ch, fn: () => {}, drag: true });
-  btn(282, 196, 14, 14, '+', () => treeZoom(1), { dis: v.zi >= ZOOMS.length - 1 }); btn(298, 196, 14, 14, '-', () => treeZoom(-1), { dis: v.zi <= 0 });
-  btn(230, 196, 48, 14, 'center', () => { v.x = 0; v.y = -60; SFX.click(); });
+  const zy = treeZY; btn(282, zy, 14, 14, '+', () => treeZoom(1), { dis: v.zi >= ZOOMS.length - 1 }); btn(298, zy, 14, 14, '-', () => treeZoom(-1), { dis: v.zi <= 0 });
+  btn(230, zy, 48, 14, 'center', () => { v.x = 0; v.y = -60; SFX.click(); });
   // tooltip in the game font
   T(charName(c) + '  Lv ' + c.lvl, 8, 28, COL.white, 1, 'l', '#000');
   bar(8, 40, 90, 2, c.xp / xpNeed(c.lvl), COL.blue);
   const n = treeSel && Tr.by[treeSel];
   if (n) {
     const S = nodeState(c, n), I = nodeInfo(c, n), PW = 312, IW = PW - 16;
-    const title = wrap(I.n, IW - textW(KINDN[n.k]) - 8), lines = wrap(I.d.join(' '), IW);
+    const title = wrap(I.n, IW - textW(KINDN[n.k]) - 8), lines = wrap(I.d.map(s => /[.!?:]$/.test(s) ? s : s + '.').join(' '), IW);
     const foot = S === 'own' ? 'Unlocked' : S === 'seal' ? 'Sealed: another path was chosen' : S === 'pick' ? '' : n.q ? reqText(n.q) : '';
     const footL = foot ? wrap(foot, IW) : [], rowH = S === 'pick' ? 24 : footL.length * 11 + 4;
-    const maxL = 9, shown = lines.slice(0, maxL), PH = 8 + title.length * 11 + 3 + shown.length * 11 + rowH + 4, PY = 288 - PH;
+    const maxL = 9, shown = lines.slice(0, maxL), PH = 8 + title.length * 11 + 3 + shown.length * 11 + rowH + 4, PY = 288 - PH; treeZY = Math.min(196, PY - 18);
     panel(4, PY, PW, PH, '#2a2a32');
     title.forEach((l, i) => T(l, 12, PY + 6 + i * 11, KINDCOL[n.k])); T(KINDN[n.k], 308, PY + 6, COL.dim, 1, 'r');
     let y = PY + 6 + title.length * 11 + 3;
@@ -2986,7 +2988,7 @@ function drawSkills() {
       msgQueue.push({ title: E.n + '!', char: c, col: COL.gold, lines: ['The ' + CLS[c.id].n + ' evolved.', ...E.d] }); msgReturn = 'skills'; scene = 'msg';
     }, { col: COL.gold, border: COL.gold });
   } else {
-    panel(4, 224, 312, 64, '#2a2a32');
+    treeZY = 196; panel(4, 224, 312, 64, '#2a2a32');
     T('Nodes light up with levels and bosses.', 12, 232, COL.dim);
     T('Each fork: pick one path for good.', 12, 245, COL.dim);
     T(TOUCH ? 'Drag to look, tap a node.' : 'Drag or scroll, click a node.', 12, 258, COL.dark);
@@ -3029,7 +3031,7 @@ function drawMsg() {
   rect(160 - w / 2 + 8, 76 + h, w - 16, 3, '#16161c');
   drawSpr(m.spr, 160 - w / 2, 76 - (Math.floor(gtime * 2) % 2), 5, '', FOES[m.spr] && FOES[m.spr].outline || null); }
   for (let i = 0; i < 6; i++) { const a = gtime * 1.5 + i * 1.047, r = 52 + Math.sin(gtime * 3 + i) * 4; rect(160 + Math.cos(a) * r, 108 + Math.sin(a) * r * .6, 2, 2, i % 2 ? m.col : '#ffffff'); }
-  m.lines.forEach((l, i) => T(l, 160, 168 + i * 13, COL.white, 1, 'c'));
+  m.lines.flatMap(l => wrap(l, 300)).slice(0, 9).forEach((l, i) => T(l, 160, 168 + i * 12, COL.white, 1, 'c'));
   if (Math.floor(gtime * 2) % 2 === 0) T(TOUCH ? 'tap to continue' : 'J to continue', 160, 296, COL.dim, 1, 'c');
   hit(0, 0, LW, LH, nextMsg);
 }
@@ -3068,6 +3070,105 @@ function drawSelect() {
   });
   btn(8, 280, 92, 32, 'Back', () => goto('title'));
   btn(108, 280, 204, 32, 'Play as ' + CLS[selHover].n, () => { chooseClass(selHover); SFX.lvl(); goto('camp'); }, { col: TINT[selHover], border: TINT[selHover] });
+}
+// ---- admin / dev panel: L key, or tap the W.A.M. logo 5 times. A cheat panel for a static site, not security. ----
+const ADM = { god: false, ohk: false, perfect: false, overlay: false, tab: 'travel', ret: 'camp', slot: 0, rar: 0, uniq: false, resetArm: 0, taps: [], fps: 60, wantPhase: 0, toast: null };
+const ADM_TABS = [['travel', 'Travel'], ['hero', 'Hero'], ['gear', 'Gear'], ['cheat', 'Cheats'], ['sys', 'System']];
+const BOSS_LV = [2, 5, 8, 11];
+function openAdmin() { if (scene === 'admin') return closeAdmin(); ADM.ret = scene === 'msg' ? 'camp' : scene; if (B && scene === 'battle') B.paused = true; scene = 'admin'; SFX.click(); }
+function closeAdmin() { scene = ADM.ret || 'camp'; if (scene === 'battle' && !B) scene = 'camp'; if (B && scene === 'battle') B.paused = false; SFX.click(); }
+function adminTap() { const now = gtime; ADM.taps = ADM.taps.filter(t => now - t < 2).concat(now); if (ADM.taps.length >= 5) { ADM.taps = []; openAdmin(); } }
+function admToast(s) { ADM.toast = { s, t: 1.6 }; }
+function admHero() { return save.chars[save.cls || save.party[0]]; }
+function admGo(li, phase) {
+  save.unlocked = Math.max(save.unlocked, li); if (li >= 9) save.act4 = true; save.sel = li; save.started = true;
+  B = null; scene = 'camp'; startLevel(li);
+  if (phase !== undefined) { B.state = 'clear'; B.st = 0; B.wave = 1; B.foes = []; ADM.wantPhase = phase; }
+}
+// called by the boss update: skip straight to the requested phase once the fight starts
+function admBossPhase(bo) {
+  if (!ADM.wantPhase || bo.st !== 'fight') return; const n = Math.min(ADM.wantPhase, bo.D.phases - 1); ADM.wantPhase = 0; if (n <= 0) return;
+  const f = bo.f; bo.phase = n; f.hp = Math.max(1, Math.ceil(f.max * (1 - n / bo.D.phases)) - 1); bo.expT = expFor(bo, n); bo.inv = !!(BOSS[bo.k].pats[n] || {}).invert; banner('Phase ' + (n + 1), bo.D.crack, 1);
+}
+function admSwitchClass(id) {
+  const old = admHero(), lvl = old.lvl, xp = old.xp; giveStarter(id); save.cls = id; const c = save.chars[id]; c.lvl = lvl; c.xp = xp;
+  save.inv = save.inv.filter(it => it.cls === id); tab = id; persist(); admToast('Now a ' + CLS[id].n);
+}
+function admSpawn() {
+  const c = admHero(), sl = SLOTS[ADM.slot]; let it = null;
+  for (let i = 0; i < 400 && !it; i++) { const t = makeItem(Math.max(1, c.lvl + 1), sl, save.cls, ADM.uniq ? 4 : ADM.rar, 0); if (ADM.uniq ? t.u : t.rar === ADM.rar && !t.u) it = t; }
+  if (!it) { admToast(ADM.uniq ? 'No unique for that slot' : 'Could not roll that'); return; }
+  if (save.inv.length >= TUNE.invMax) { admToast('Bag full'); return; }
+  save.inv.push(it); persist(); admToast('Spawned ' + (it.name || lookName(it)));
+}
+function admEvos(cls) { // every evolution in this class's family, grouped by tier
+  const fam = new Set([cls]); let grew = true; while (grew) { grew = false; for (const k in EVO) if (fam.has(EVO[k].from) && !fam.has(k)) { fam.add(k); grew = true; } }
+  return [1, 2, 3].map(t => Object.keys(EVO).filter(k => EVO[k].tier === t && fam.has(k)));
+}
+function admSetEvo(k) { // take the path, and its ancestors, at any tier
+  const c = admHero(), E = EVO[k]; c.evo = k; c.lvl = Math.max(c.lvl, EVOLV[E.tier - 1]);
+  let p = k; while (p && EVO[p]) { if (!c.seen.includes(p)) c.seen.push(p); p = EVO[p].from; }
+  persist(); admToast(E.n);
+}
+function aBtn(x, y, w, label, fn, o = {}) { btn(x, y, w, 15, label, () => { fn(); SFX.click(); }, o); }
+function drawAdmin() {
+  drawArena('#c83040');
+  panel(4, 4, 312, 312, '#c83040');
+  T('Admin', 12, 10, '#ff6a6a'); T('dev panel', 18 + textW('Admin'), 10, COL.dark);
+  aBtn(262, 8, 48, 'Close', closeAdmin, { col: COL.white });
+  ADM_TABS.forEach(([id, n], i) => aBtn(10 + i * 61, 26, 58, n, () => { ADM.tab = id; ADM.resetArm = 0; }, { sel: ADM.tab === id, col: ADM.tab === id ? COL.gold : COL.dim }));
+  const c = admHero(), x0 = 12; let y = 50;
+  const lab = (s, yy) => T(s, x0, yy, COL.dim);
+  if (ADM.tab === 'travel') {
+    for (let a = 0; a < 4; a++) {
+      T(ACTS[a].roman, x0, y + 4, ACTS[a].c); T(ACTS[a].n, x0 + 20, y + 4, COL.white);
+      for (let l = 0; l < 3; l++) { const li = a * 3 + l; aBtn(176 + l * 46, y, 42, (a + 1) + '-' + (l + 1), () => admGo(li), { col: l === 2 ? '#ff9a9a' : COL.white }); }
+      y += 20;
+    }
+    y += 6; lab('Boss, starting phase', y); y += 14;
+    BOSS_LV.forEach((li, i) => {
+      const k = LEVELS[li].w[2][0], P = BOSS[k].phases; T(FOES[k].n, x0, y + 4, ACTS[i].c);
+      for (let p = 0; p < P; p++) aBtn(150 + p * 40, y, 36, 'P' + (p + 1), () => admGo(li, p), { col: COL.gold });
+      y += 20;
+    });
+    y += 6; aBtn(x0, y, 140, 'Unlock all levels', () => { save.unlocked = 11; save.act4 = true; save.cleared = save.cleared.map(() => true); persist(); admToast('All levels open'); }, { col: COL.green });
+  } else if (ADM.tab === 'hero') {
+    T(charName(c) + '  Lv ' + c.lvl, x0, y, TINT[c.id]); y += 14;
+    lab('Level', y + 4); [['-5', -5], ['-1', -1], ['+1', 1], ['+5', 5], ['Max', 99]].forEach(([s, d], i) => aBtn(70 + i * 46, y, 42, s, () => { c.lvl = clamp(d === 99 ? 20 : c.lvl + d, 1, 20); c.xp = 0; persist(); }));
+    y += 20; lab('XP', y + 4); bar(70, y + 6, 100, 3, c.xp / xpNeed(c.lvl), COL.blue);
+    aBtn(176, y, 64, '+50%', () => { c.xp += Math.round(xpNeed(c.lvl) * .5); while (c.xp >= xpNeed(c.lvl) && c.lvl < 20) { c.xp -= xpNeed(c.lvl); c.lvl++; } persist(); });
+    aBtn(244, y, 60, 'Fill', () => { c.xp = xpNeed(c.lvl) - 1; persist(); });
+    y += 20; lab('Scrap ' + save.scrap, y + 4); aBtn(176, y, 64, '+10', () => { save.scrap += 10; persist(); }); aBtn(244, y, 60, '+100', () => { save.scrap += 100; persist(); });
+    y += 20; lab('Perfects ' + save.perfects, y + 4); aBtn(176, y, 64, '+10', () => { save.perfects += 10; persist(); }); aBtn(244, y, 60, '+100', () => { save.perfects += 100; persist(); });
+    y += 22; lab('Class', y + 4); ['warrior', 'archer', 'mage'].forEach((id, i) => aBtn(70 + i * 78, y, 74, CLS[id].n, () => admSwitchClass(id), { sel: save.cls === id, col: TINT[id] }));
+    y += 22; lab('Evolution (any tier)', y); y += 12;
+    admEvos(c.id).forEach((ks, t) => { T('T' + (t + 1), x0, y + 4, COL.dark); let xx = 34; ks.forEach(k => { const w = textW(EVO[k].n) + 10; if (xx + w > 308) { xx = 34; y += 17; } aBtn(xx, y, w, EVO[k].n, () => admSetEvo(k), { sel: c.evo === k, col: COL.gold }); xx += w + 4; }); y += 18; });
+    aBtn(x0, y, 120, 'No evolution', () => { c.evo = null; persist(); }); aBtn(138, y, 166, 'Unlock all skills', () => { c.lvl = 20; save.cleared = save.cleared.map(() => true); save.unlocked = 11; save.act4 = true; for (const n of buildTree(c.id).N) if (!c.seen.includes(n.id)) c.seen.push(n.id); persist(); admToast('All nodes lit'); }, { col: COL.green });
+  } else if (ADM.tab === 'gear') {
+    T('Spawn for ' + CLS[c.id].n + '  (bag ' + save.inv.length + '/' + TUNE.invMax + ')', x0, y, COL.white); y += 16;
+    lab('Slot', y + 4); SLOTS.forEach((s, i) => aBtn(52 + (i % 3) * 84, y + Math.floor(i / 3) * 18, 80, s, () => { ADM.slot = i; }, { sel: ADM.slot === i }));
+    y += 42; lab('Rarity', y + 4); RAR.forEach((r, i) => aBtn(52 + (i % 3) * 84, y + Math.floor(i / 3) * 18, 80, r.n, () => { ADM.rar = i; ADM.uniq = false; }, { sel: !ADM.uniq && ADM.rar === i, col: r.c }));
+    y += Math.ceil(RAR.length / 3) * 18 + 6; aBtn(52, y, 164, ADM.uniq ? 'Unique: on' : 'Unique: off', () => { ADM.uniq = !ADM.uniq; }, { sel: ADM.uniq, col: COL.gold });
+    y += 24; aBtn(52, y, 164, 'Spawn item', admSpawn, { col: COL.green });
+    y += 22; aBtn(52, y, 164, 'Open gear screen', () => { ADM.ret = 'camp'; tab = c.id; scene = 'gear'; });
+  } else if (ADM.tab === 'cheat') {
+    const tog = (lbl, k) => { aBtn(x0, y, 200, lbl + (ADM[k] ? ': on' : ': off'), () => { ADM[k] = !ADM[k]; }, { sel: ADM[k], col: ADM[k] ? COL.green : COL.dim }); y += 20; };
+    tog('God mode', 'god'); tog('One-hit kills', 'ohk'); tog('Always perfect', 'perfect'); tog('FPS + hitboxes', 'overlay');
+    y += 4; lab('Game speed x' + WAM.timeScale, y); y += 14;
+    [.25, .5, 1, 2, 4].forEach((s, i) => aBtn(x0 + i * 58, y, 54, 'x' + s, () => { WAM.timeScale = s; }, { sel: WAM.timeScale === s }));
+  } else {
+    T('Save: ' + CLS[c.id].n + ' Lv ' + c.lvl + ', ' + save.cleared.filter(Boolean).length + '/12 cleared', x0, y, COL.white); y += 20;
+    aBtn(x0, y, 200, ADM.resetArm ? 'Sure? tap again' : 'Reset save', () => { if (!ADM.resetArm) { ADM.resetArm = 1; return; } ADM.resetArm = 0; localStorage.removeItem(SAVE_KEY); newSave(); B = null; ADM.ret = 'title'; scene = 'title'; }, { col: ADM.resetArm ? COL.red : COL.white });
+    y += 24; wrap('Open with L, or tap the W.A.M. logo 5 times. Cheats are for testing; they are not saved.', 290).forEach(l => { T(l, x0, y, COL.dark); y += 11; });
+  }
+  if (ADM.toast) { ADM.toast.t -= 1 / 60; if (ADM.toast.t <= 0) ADM.toast = null; else { const w = Math.min(296, textW(ADM.toast.s) + 16); panel(160 - w / 2, 290, w, 18, COL.gold); T(ADM.toast.s, 160, 295, COL.gold, 1, 'c'); } }
+}
+function drawAdminOverlay(dt) {
+  if (!ADM.overlay) return;
+  ADM.fps += ((dt > 0 ? 1 / dt : 60) - ADM.fps) * .05;
+  ctx.globalAlpha = .7; for (const u of UI) { ctx.strokeStyle = u.drag ? '#3aa0ff' : '#ff3a8a'; ctx.strokeRect(u.x + .5, u.y + .5, u.w - 1, u.h - 1); } ctx.globalAlpha = 1;
+  if (B && scene === 'battle') for (const f of B.foes) if (!f.dead) { const [cx, cy] = foeCenter(f); rect(cx - 1, cy - 1, 3, 3, '#ff3a8a'); }
+  rect(-OX + 2, -OY + 2, 64, 13, '#000'); T(Math.round(ADM.fps / Math.max(.25, WAM.timeScale)) + ' fps', -OX + 5, -OY + 4, '#7ee07e');
 }
 // ================= battle drawing =================
 function drawBattle() {
@@ -3327,7 +3428,7 @@ function drawResult() {
     const n = Math.min(8, B.loot.length), sx = 160 - n * 13;
     B.loot.slice(0, 8).forEach((it, i) => drawItemCell(it, sx + i * 26, 144, 24, false, false));
     if (B.loot.length > 8) T('+' + (B.loot.length - 8), 270, 150, COL.dim, 1, 'r');
-  } else T('no loot this time', 160, 140, COL.dark, 1, 'c');
+  } else T('no loot this time', 160, 150, COL.dark, 1, 'c');
   if (!win) { T('Loot and XP are kept.', 160, 180, COL.dim, 1, 'c'); T('Gear up, spend points, try again.', 160, 193, COL.dim, 1, 'c'); }
   if (B.st <= 0) { if (Math.floor(gtime * 2) % 2 === 0) T(TOUCH ? 'tap to continue' : 'J to continue', 160, 218, COL.white, 1, 'c'); hit(0, 0, LW, LH, leaveBattle); }
 }
@@ -3374,6 +3475,8 @@ addEventListener('keydown', e => {
   audio();
   const k = e.code;
   if (k === 'KeyJ' || k === 'Space' || k === 'Enter') { e.preventDefault(); onJ(); return; }
+  if (k === 'KeyL') { e.preventDefault(); openAdmin(); return; }
+  if (scene === 'admin') { if (k === 'Escape') closeAdmin(); return; }
   if (k === 'KeyM') { save.mute = !save.mute; persist(); }
   if (scene === 'battle' && B) {
     if (k === 'Digit1' || k === 'Digit2' || k === 'Digit3') switchTo(+k.slice(5) - 1);
@@ -3443,10 +3546,12 @@ function loop(now) {
     else if (scene === 'skills') drawSkills();
     else if (scene === 'party') drawParty();
     else if (scene === 'select') drawSelect();
+    else if (scene === 'admin') drawAdmin();
     else if (scene === 'msg') drawMsg();
     else if (scene === 'battle' && B) drawBattle();
     drawStrip();
     if (scene === 'battle' && B) drawBossOverlay();
+    drawAdminOverlay(dt);
   } catch (err) { console.error(err); }
   requestAnimationFrame(loop);
 }

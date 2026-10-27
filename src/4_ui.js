@@ -1,3 +1,4 @@
+let treeZY = 196;
 // ================= UI / scenes =================
 let scene = 'title', UI = [], mouse = { x: -1, y: -1 }, msgQueue = [], tab = 'warrior', selItem = null, selSkill = null, evoPick = null, confirmNew = 0, gtime = 0;
 // ---------- fantasy pixel frames: carved stone + gilded filigree ----------
@@ -90,7 +91,7 @@ function backBtn() { btn(8, 292, 70, 22, 'Back', () => goto('camp')); }
 // ---------- title ----------
 function drawTitle() {
   drawArena('#f4f4f4');
-  T('W.A.M.', 160, 54, '#ffffff', 4, 'c', '#24242c');
+  T('W.A.M.', 160, 54, '#ffffff', 4, 'c', '#24242c'); hit(80, 50, 160, 40, adminTap);
   const bob = Math.floor(gtime * 2) % 2;
   rect(160 - 22, 196, 44, 3, '#16161c');
   drawChar(save.chars[save.party[0]], 160 - 30, 136 - bob, 5);
@@ -159,7 +160,7 @@ function bigTitle() {
   if (!logoBuf || logoBuf.S !== S) logoBuf = buildLogo(S);
   const L = logoBuf, band = OY, bob = RM ? 0 : Math.round(Math.sin(gtime * .9) * 1);
   const x = Math.round(160 - L.W / 2), y = Math.round(-band / 2 - L.H / 2) + bob;
-  ctx.drawImage(L.c, x, y);
+  ctx.drawImage(L.c, x, y); hit(x, y, L.W, L.H, adminTap);
   if (!RM) { // occasional glint: a thin diagonal light sweeps across the letters every ~6s
     const ph = (gtime % 6.5) / 1.1; if (ph < 1) { const gx = Math.round(-10 + ph * (L.W + 20)); ctx.globalAlpha = .7;
       for (let j = 0; j < L.H; j++) for (let i = 0; i < 2; i++) { const px = gx + i - j / 2 | 0; if (L.mask(px, j)) { ctx.fillStyle = '#ffffff'; ctx.fillRect(x + px, y + j, 1, 1); } } ctx.globalAlpha = 1; } }
@@ -170,7 +171,7 @@ function drawCamp() {
   drawArena(ACTS[sa].c);
   bigTitle();
   T('Perfect ' + save.perfects, 8, 10, COL.gold);
-  btn(250, 6, 62, 16, save.mute ? 'Sound off' : 'Sound on', () => { save.mute = !save.mute; persist(); SFX.click(); }, { col: COL.dim });
+  btn(240, 6, 72, 16, save.mute ? 'Sound off' : 'Sound on', () => { save.mute = !save.mute; persist(); SFX.click(); }, { col: COL.dim });
   const showAct4 = save.cleared[8] || save.act4;
   for (let a = 0; a < (showAct4 ? 4 : 3); a++) {
     const y = 38 + a * 25, A = ACTS[a], open = a < 3 || save.act4;
@@ -400,18 +401,18 @@ function drawSkills() {
   ctx.restore();
   // drag to pan; wheel or buttons to zoom
   UI.unshift({ x: cx0, y: cy0, w: cw, h: ch, fn: () => {}, drag: true });
-  btn(282, 196, 14, 14, '+', () => treeZoom(1), { dis: v.zi >= ZOOMS.length - 1 }); btn(298, 196, 14, 14, '-', () => treeZoom(-1), { dis: v.zi <= 0 });
-  btn(230, 196, 48, 14, 'center', () => { v.x = 0; v.y = -60; SFX.click(); });
+  const zy = treeZY; btn(282, zy, 14, 14, '+', () => treeZoom(1), { dis: v.zi >= ZOOMS.length - 1 }); btn(298, zy, 14, 14, '-', () => treeZoom(-1), { dis: v.zi <= 0 });
+  btn(230, zy, 48, 14, 'center', () => { v.x = 0; v.y = -60; SFX.click(); });
   // tooltip in the game font
   T(charName(c) + '  Lv ' + c.lvl, 8, 28, COL.white, 1, 'l', '#000');
   bar(8, 40, 90, 2, c.xp / xpNeed(c.lvl), COL.blue);
   const n = treeSel && Tr.by[treeSel];
   if (n) {
     const S = nodeState(c, n), I = nodeInfo(c, n), PW = 312, IW = PW - 16;
-    const title = wrap(I.n, IW - textW(KINDN[n.k]) - 8), lines = wrap(I.d.join(' '), IW);
+    const title = wrap(I.n, IW - textW(KINDN[n.k]) - 8), lines = wrap(I.d.map(s => /[.!?:]$/.test(s) ? s : s + '.').join(' '), IW);
     const foot = S === 'own' ? 'Unlocked' : S === 'seal' ? 'Sealed: another path was chosen' : S === 'pick' ? '' : n.q ? reqText(n.q) : '';
     const footL = foot ? wrap(foot, IW) : [], rowH = S === 'pick' ? 24 : footL.length * 11 + 4;
-    const maxL = 9, shown = lines.slice(0, maxL), PH = 8 + title.length * 11 + 3 + shown.length * 11 + rowH + 4, PY = 288 - PH;
+    const maxL = 9, shown = lines.slice(0, maxL), PH = 8 + title.length * 11 + 3 + shown.length * 11 + rowH + 4, PY = 288 - PH; treeZY = Math.min(196, PY - 18);
     panel(4, PY, PW, PH, '#2a2a32');
     title.forEach((l, i) => T(l, 12, PY + 6 + i * 11, KINDCOL[n.k])); T(KINDN[n.k], 308, PY + 6, COL.dim, 1, 'r');
     let y = PY + 6 + title.length * 11 + 3;
@@ -422,7 +423,7 @@ function drawSkills() {
       msgQueue.push({ title: E.n + '!', char: c, col: COL.gold, lines: ['The ' + CLS[c.id].n + ' evolved.', ...E.d] }); msgReturn = 'skills'; scene = 'msg';
     }, { col: COL.gold, border: COL.gold });
   } else {
-    panel(4, 224, 312, 64, '#2a2a32');
+    treeZY = 196; panel(4, 224, 312, 64, '#2a2a32');
     T('Nodes light up with levels and bosses.', 12, 232, COL.dim);
     T('Each fork: pick one path for good.', 12, 245, COL.dim);
     T(TOUCH ? 'Drag to look, tap a node.' : 'Drag or scroll, click a node.', 12, 258, COL.dark);
@@ -465,7 +466,7 @@ function drawMsg() {
   rect(160 - w / 2 + 8, 76 + h, w - 16, 3, '#16161c');
   drawSpr(m.spr, 160 - w / 2, 76 - (Math.floor(gtime * 2) % 2), 5, '', FOES[m.spr] && FOES[m.spr].outline || null); }
   for (let i = 0; i < 6; i++) { const a = gtime * 1.5 + i * 1.047, r = 52 + Math.sin(gtime * 3 + i) * 4; rect(160 + Math.cos(a) * r, 108 + Math.sin(a) * r * .6, 2, 2, i % 2 ? m.col : '#ffffff'); }
-  m.lines.forEach((l, i) => T(l, 160, 168 + i * 13, COL.white, 1, 'c'));
+  m.lines.flatMap(l => wrap(l, 300)).slice(0, 9).forEach((l, i) => T(l, 160, 168 + i * 12, COL.white, 1, 'c'));
   if (Math.floor(gtime * 2) % 2 === 0) T(TOUCH ? 'tap to continue' : 'J to continue', 160, 296, COL.dim, 1, 'c');
   hit(0, 0, LW, LH, nextMsg);
 }

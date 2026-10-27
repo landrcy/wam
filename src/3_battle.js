@@ -59,6 +59,7 @@ function pressJ() {
   const u = activeUnit(); if (!u) return;
   if (mechOf(u) !== 'bow') return strike();
   if (B.cd > 0) return;
+  if (ADM.perfect) B.mk = B.zc;
   if (!B.drawing) { B.drawing = true; B.drawT = B.t; B.tapMode = false; B.over = 0; B.mk = 0; SFX.click(); }
   else if (B.tapMode) bowRelease();
 }
@@ -232,7 +233,7 @@ function hitFoe(f, dmg, info, u) {
   if (f.T.ghost && info.q === 'good') dmg *= .5;
   if (f.T.plated && info.q === 'good') dmg *= .6;
   dmg = Math.max(1, Math.round(dmg));
-  f.hp -= dmg; const isB = B.boss && B.boss.f === f; f.flash = isB ? (info.manual ? .06 : Math.max(f.flash, 0)) : .09;
+  if (ADM.ohk) dmg = Math.max(dmg, f.hp); f.hp -= dmg; const isB = B.boss && B.boss.f === f; f.flash = isB ? (info.manual ? .06 : Math.max(f.flash, 0)) : .09;
   const str = clamp(dmg / f.max * (isB ? 12 : 3), 0, 1); f.kx = Math.round((info.q === 'splash' ? 2 : 4) + str * (isB ? 6 : 16) + (info.q === 'perfect' ? 4 : 0));
   if (info.manual) B.shake = Math.max(B.shake, 1.5 + str * 6 + (info.crit ? 2 : 0));
   const [cx, cy] = foeCenter(f);
@@ -305,7 +306,7 @@ function foeHit(f) {
     let d = f.dmg * rnd(.9, 1.1) * (P.slam ? .7 : 1) * 30 / (30 + u.s.arm);
     if (P.dodge) { d *= .4; u.hop = .32; num(u.x - 10, u.y - 64, 'dodge', COL.green); }
     if (u.guard) { d *= .5; u.guard = 0; num(u.x, u.y - 64, 'guard', COL.blue); }
-    d = Math.max(1, Math.round(d)); u.hp -= d;
+    d = Math.max(1, Math.round(d)); if (ADM.god) d = 0; u.hp -= d;
     if (u.s.thorns && !f.dead) hitFoe(f, d * u.s.thorns * 2, { q: 'splash' }, u); u.hurt = .22; u.kb = Math.max(u.kb, P.dodge ? 2 : 7);
     num(u.x + rnd(-5, 5), u.y - 54, '-' + d, COL.red, d > u.max * .2 ? 2 : 1);
     for (let i = 0; i < 8; i++) spark(u.x, u.y - 24, i % 2 ? '#ff5a5a' : '#ffffff', 100);

@@ -376,7 +376,7 @@ function updateBoss(dt) {
     if (t > 1.4 && !ev.ref) { ev.ref = 1; bo.integ = 1; bossFlash('#ffffff', .3); SFX.reform(); }
     if (t > 1.9) bo.st = 'done';
   }
-  updateBossMove(bo, dt);
+  updateBossMove(bo, dt); admBossPhase(bo);
   if (bo.st === 'fight' && !f.dead) {
     const pat = bossPat() || {};
     if (pat.drift && B.state === 'fight') B.zc = clamp(B.zBase + Math.sin(B.t * 1.6) * pat.drift, .12, .88);
