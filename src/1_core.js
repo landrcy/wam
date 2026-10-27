@@ -9,13 +9,17 @@ const STRIP = TOUCH ? 76 : 0;
 const LH = AH + STRIP;
 const cv = document.getElementById('c');
 const ctx = cv.getContext('2d');
-cv.width = LW; cv.height = LH;
-ctx.imageSmoothingEnabled = false;
+const RM = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) || /[?&]calm/.test(Q);
+// The canvas covers the whole window at an integer pixel scale. The 320px arena sits in the middle (OX, OY);
+// everything outside it is the black void that bosses and cracks can spill onto.
+let VW = LW, VH = LH, OX = 0, OY = 0, PXS = 1;
 function resize() {
   const dpr = window.devicePixelRatio || 1;
   const s = Math.max(1, Math.floor(Math.min(innerWidth * dpr / LW, innerHeight * dpr / LH)));
-  cv.style.width = (LW * s / dpr) + 'px';
-  cv.style.height = (LH * s / dpr) + 'px';
+  PXS = s; VW = Math.ceil(innerWidth * dpr / s); VH = Math.ceil(innerHeight * dpr / s);
+  cv.width = VW; cv.height = VH; ctx.imageSmoothingEnabled = false;
+  cv.style.width = (VW * s / dpr) + 'px'; cv.style.height = (VH * s / dpr) + 'px';
+  OX = Math.floor((VW - LW) / 2); OY = Math.floor((VH - LH) / 2);
 }
 addEventListener('resize', resize); resize();
 
@@ -43,7 +47,8 @@ const PAL = {
   y:'#e8c25a', Y:'#a8842e', r:'#d8464a', R:'#8a2430', o:'#a8703a', O:'#6b4424',
   h:'#5fae5f', H:'#2f6e3c', l:'#b8ffc8', b:'#4f7fd8', B:'#2a3f8a', p:'#9a5fd0', P:'#5a3080',
   c:'#9fe6f4', C:'#3a8aa8', f:'#ff9a3a', F:'#ffe08a', u:'#d8d0b8', U:'#8a8270', v:'#c070ff',
-  n:'#2c2c36', m:'#141018', e:'#ff4060', t:'#e86aa0'
+  n:'#2c2c36', m:'#141018', e:'#ff4060', t:'#e86aa0',
+  '1':'#ffb04a', '2':'#9cff6a', '3':'#ff4a5a', '4':'#e8e0ff'
 };
 const COL = { white:'#f2f2f2', dim:'#8a8a96', dark:'#45454f', gold:'#ffd35a', red:'#ff5a5a', green:'#7ee07e', blue:'#7aa8ff', panel:'#0b0b0e', line:'#2c2c34' };
 
@@ -432,4 +437,12 @@ const SFX = {
   win() { [523, 659, 784, 659, 1046].forEach((f, i) => tone(f, .12, 'square', .14, 0, i * .09)); },
   lose() { [392, 330, 262, 196].forEach((f, i) => tone(f, .18, 'triangle', .2, 0, i * .14)); },
   tick() { tone(1200, .015, 'square', .05); },
+  rumble() { tone(55, .9, 'sawtooth', .16, -15); noise(.5, .18, 180); },
+  crack() { noise(.07, .4, 3200); tone(900 + rnd(400), .05, 'square', .08, -600); },
+  shatter() { noise(.5, .5, 2400); [2100, 1600, 2500, 1300, 1900].forEach((f, i) => tone(f, .1, 'square', .07, -900, i * .035)); tone(70, .55, 'sawtooth', .28, -30); },
+  land() { noise(.35, .55, 260); tone(58, .35, 'sine', .45, -25); },
+  roar() { tone(98, .75, 'sawtooth', .2, -45); tone(147, .6, 'square', .1, -70, .06); noise(.5, .3, 650); },
+  morph() { [880, 660, 440, 330].forEach((f, i) => tone(f, .09, 'square', .1, 0, i * .05)); noise(.25, .25, 4000, .2); },
+  bossDie() { tone(220, .9, 'sawtooth', .22, -190); noise(.5, .45, 1200); [1760, 1320, 990, 740].forEach((f, i) => tone(f, .12, 'square', .08, 0, .25 + i * .07)); },
+  reform() { [392, 523, 659, 784, 1046, 1318].forEach((f, i) => tone(f, .12, 'square', .11, 0, i * .06)); noise(.3, .15, 5000, .35); },
 };

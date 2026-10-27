@@ -11,7 +11,12 @@ Play: https://landrcy.github.io/wam/
 - **Esc / P**: pause or back. **M**: mute.
 - Mobile: STRIKE / Swap / Menu buttons under the arena.
 
+## Notes
+- Bosses (end of each act + the secret Act IV) shatter the arena and spill into the void, with 2-4 phases each.
+- Respects `prefers-reduced-motion` (or add `?calm`): less shake and flash, no warp or color inversion.
+- Secret Act IV: clear Act III and land 60 lifetime PERFECT hits.
+
 ## Code
 `src/*.js` are concatenated into `js/game.js`:
-`cat src/1_core.js src/2_data.js src/3_battle.js src/4_ui.js src/5_main.js > js/game.js`.
+`sh src/build.sh`.
 Tuning knobs are in `TUNE` (src/1_core.js). Add `?debug` to the URL to unlock everything.

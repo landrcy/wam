@@ -69,7 +69,7 @@ const ACTS = [
 const LEVELS = [
   { n: 'Slime Meadow', w: [['slime'], ['slime', 'slime'], ['bigslime']] },
   { n: 'Bat Cave', w: [['bat', 'bat'], ['bat', 'slime', 'bat'], ['bat', 'bat', 'bat']] },
-  { n: 'Goblin Camp', w: [['goblin'], ['goblin', 'goblin'], ['goblin', 'gobchief', 'goblin']] },
+  { n: 'Goblin Camp', w: [['goblin'], ['goblin', 'goblin'], ['gobchief']] },
   { n: 'Spore Grove', w: [['shroom', 'shroom'], ['shroom', 'shroom', 'shroom'], ['shroom', 'wolf', 'shroom']] },
   { n: 'Wolf Den', w: [['wolf'], ['wolf', 'wolf'], ['wolf', 'wolf', 'wolf']] },
   { n: 'Elder Root', w: [['wolf', 'shroom'], ['shroom', 'wolf', 'shroom'], ['treant']] },

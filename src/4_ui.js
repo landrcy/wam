@@ -1,11 +1,46 @@
 // ================= UI / scenes =================
 let scene = 'title', UI = [], mouse = { x: -1, y: -1 }, msgQueue = [], tab = 'warrior', selItem = null, selSkill = null, evoPick = null, confirmNew = 0, gtime = 0;
+// ---------- fantasy pixel frames: carved stone + gilded filigree ----------
+const STONE = { d: '#121016', m: '#1e1a24', l: '#3a3444', h: '#56506a' };
+const GILD = { d: '#5a4018', m: '#9a7428', l: '#d8b04a', h: '#fff0a0' };
+function gem(x, y, c) { // 5x5 cut gem in a gold setting, top-left at x,y
+  rect(x + 2, y, 1, 1, GILD.m); rect(x + 1, y + 1, 1, 1, GILD.m); rect(x + 3, y + 1, 1, 1, GILD.m); rect(x, y + 2, 1, 1, GILD.m); rect(x + 4, y + 2, 1, 1, GILD.m);
+  rect(x + 1, y + 3, 1, 1, GILD.d); rect(x + 3, y + 3, 1, 1, GILD.d); rect(x + 2, y + 4, 1, 1, GILD.d);
+  rect(x + 2, y + 1, 1, 3, c); rect(x + 1, y + 2, 3, 1, c); rect(x + 2, y + 1, 1, 1, '#ffffff');
+}
+function filigree(x, y, sx, sy, col, L) { // gilded corner bracket with a little curl
+  for (let i = 0; i < L; i++) { rect(x + sx * i, y, 1, 1, col); rect(x, y + sy * i, 1, 1, col); }
+  rect(x + sx * 2, y + sy * 2, 1, 1, col); rect(x + sx * 3, y + sy * 2, 1, 1, col); rect(x + sx * 2, y + sy * 3, 1, 1, col);
+  if (L > 6) { rect(x + sx * (L - 1), y + sy, 1, 1, col); rect(x + sx, y + sy * (L - 1), 1, 1, col); }
+}
+function ornFrame(x, y, w, h, o = {}) {
+  const trim = o.trim || GILD.m, L = o.L || (Math.min(w, h) >= 40 ? 7 : 4);
+  rect(x, y, w, 1, STONE.h); rect(x, y, 1, h, STONE.h); rect(x, y + h - 1, w, 1, STONE.l); rect(x + w - 1, y, 1, h, STONE.l);
+  rect(x + 1, y + 1, w - 2, 1, STONE.d); rect(x + 1, y + h - 2, w - 2, 1, STONE.d); rect(x + 1, y + 1, 1, h - 2, STONE.d); rect(x + w - 2, y + 1, 1, h - 2, STONE.d);
+  filigree(x + 1, y + 1, 1, 1, trim, L); filigree(x + w - 2, y + 1, -1, 1, trim, L); filigree(x + 1, y + h - 2, 1, -1, trim, L); filigree(x + w - 2, y + h - 2, -1, -1, trim, L);
+  if (o.mid && w >= 90) for (const yy of [y, y + h - 1]) { const cx = x + Math.floor(w / 2); rect(cx - 6, yy, 3, 1, trim); rect(cx + 4, yy, 3, 1, trim); rect(cx - 1, yy - 1, 3, 3, STONE.d); rect(cx, yy - 1, 1, 3, trim); rect(cx - 1, yy, 3, 1, trim); }
+  if (o.gem) { gem(x - 2, y - 2, o.gem); gem(x + w - 3, y - 2, o.gem); gem(x - 2, y + h - 3, o.gem); gem(x + w - 3, y + h - 3, o.gem); }
+}
+function ornDivider(x, y, w, col = GILD.m) {
+  const cx = x + Math.floor(w / 2);
+  for (let i = x + 4; i < x + w - 4; i += 2) rect(i, y, 1, 1, i % 4 ? STONE.l : col);
+  rect(x, y, 2, 1, col); rect(x + w - 2, y, 2, 1, col); rect(x + 2, y - 1, 1, 1, col); rect(x + w - 3, y - 1, 1, 1, col);
+  rect(cx - 2, y - 2, 5, 5, '#000'); gem(cx - 2, y - 2, col === GILD.m ? '#7a5cff' : col);
+}
+function slotBox(x, y, w, h, accent) { // inset stone slot
+  rect(x, y, w, h, '#0c0a10'); rect(x, y, w, 1, STONE.d); rect(x, y, 1, h, STONE.d); rect(x, y + h - 1, w, 1, STONE.l); rect(x + w - 1, y, 1, h, STONE.l);
+  if (accent) { frame(x, y, w, h, accent); rect(x, y, 1, 1, '#000'); rect(x + w - 1, y, 1, 1, '#000'); rect(x, y + h - 1, 1, 1, '#000'); rect(x + w - 1, y + h - 1, 1, 1, '#000'); rect(x + 1, y + 1, 1, 1, accent); rect(x + w - 2, y + 1, 1, 1, accent); }
+}
 function btn(x, y, w, h, label, fn, o = {}) {
   const hov = !o.dis && mouse.x >= x && mouse.x < x + w && mouse.y >= y && mouse.y < y + h;
-  rect(x, y, w, h, o.fill || (hov ? '#1c1c24' : '#0e0e12'));
-  frame(x, y, w, h, o.dis ? '#24242c' : o.sel ? '#ffffff' : hov ? '#9a9aa6' : (o.border || '#3a3a44'));
+  const edge = o.dis ? '#221e28' : o.sel ? GILD.l : hov ? '#9a8aa8' : (o.border || STONE.h);
+  rect(x, y, w, h, o.fill || (hov ? '#221c2a' : '#141118'));
+  rect(x + 1, y + 1, w - 2, 1, o.dis ? '#18151c' : '#2e2838'); rect(x + 1, y + h - 2, w - 2, 1, '#0a080c');
+  frame(x, y, w, h, edge);
+  for (const [cx, cy] of [[x, y], [x + w - 1, y], [x, y + h - 1], [x + w - 1, y + h - 1]]) rect(cx, cy, 1, 1, '#000');
+  if (!o.dis && h >= 16) { const rc = o.sel ? GILD.h : GILD.m; rect(x + 2, y + 2, 1, 1, rc); rect(x + w - 3, y + 2, 1, 1, rc); rect(x + 2, y + h - 3, 1, 1, rc); rect(x + w - 3, y + h - 3, 1, 1, rc); }
   if (label) T(label, x + w / 2, y + Math.floor((h - 10) / 2), o.dis ? COL.dark : (o.col || COL.white), o.sc || 1, 'c');
-  if (o.badge) rect(x + w - 5, y + 2, 3, 3, COL.gold);
+  if (o.badge) gem(x + w - 7, y + 2, COL.gold);
   if (!o.dis && fn) UI.push({ x, y, w, h, fn });
 }
 function hit(x, y, w, h, fn) { UI.push({ x, y, w, h, fn }); }
@@ -14,13 +49,33 @@ function corners(x, y, w, h, col, l = 5) {
   rect(x, y, l, 1, col); rect(x, y, 1, l, col); rect(x + w - l, y, l, 1, col); rect(x + w - 1, y, 1, l, col);
   rect(x, y + h - 1, l, 1, col); rect(x, y + h - l, 1, l, col); rect(x + w - l, y + h - 1, l, 1, col); rect(x + w - 1, y + h - l, 1, l, col);
 }
-function drawArena(accent = '#3a3a44') {
+// tiny runes carved into the arena edge
+const RUNES = [[0b010, 0b111, 0b010, 0b010, 0b010], [0b101, 0b110, 0b100, 0b110, 0b101], [0b111, 0b001, 0b010, 0b100, 0b111], [0b100, 0b110, 0b101, 0b110, 0b100], [0b011, 0b100, 0b010, 0b001, 0b110]];
+function rune(x, y, r, col) { RUNES[r].forEach((m, yy) => { for (let xx = 0; xx < 3; xx++) if (m & (4 >> xx)) rect(x + xx, y + yy, 1, 1, col); }); }
+function drawArena(accent = GILD.m) {
+  const bo = scene === 'battle' && B && B.boss;
+  if (bo) drawCracks();
   rect(0, 0, LW, LH, '#000');
-  ctx.fillStyle = '#111115';
+  ctx.fillStyle = '#121117';
   for (let y = 8; y < AH; y += 16) for (let x = 8; x < LW; x += 16) ctx.fillRect(x, y, 1, 1);
-  frame(0, 0, LW, AH, '#202028'); corners(0, 0, LW, AH, accent, 8);
+  if (bo && bo.integ < 1) { // shattered border: only jagged remnants
+    let i = 0;
+    for (let x = 0; x < LW; x += 8, i++) { if (borderSegVisible(i)) { rect(x, 0, 8, 1, STONE.h); rect(x, 1, 8, 1, STONE.d); } if (borderSegVisible(i + 97)) { rect(x, AH - 1, 8, 1, STONE.l); rect(x, AH - 2, 8, 1, STONE.d); } }
+    for (let y = 0; y < AH; y += 8, i++) { if (borderSegVisible(i + 211)) { rect(0, y, 1, 8, STONE.h); rect(1, y, 1, 8, STONE.d); } if (borderSegVisible(i + 307)) { rect(LW - 1, y, 1, 8, STONE.l); rect(LW - 2, y, 1, 8, STONE.d); } }
+    if (bo.integ > .95) ornFrame(0, 0, LW, AH, { trim: accent, L: 12, mid: true });
+    return;
+  }
+  ornFrame(0, 0, LW, AH, { trim: accent, L: 12, mid: true });
+  for (const [x, y] of [[2, 2], [LW - 7, 2], [2, AH - 7], [LW - 7, AH - 7]]) gem(x, y, accent === GILD.m ? '#7a5cff' : accent);
+  const rc = '#3a3022';
+  [0, 1, 2].forEach(k => { rune(3, 120 + k * 30, (k + 1) % 5, rc); rune(LW - 6, 120 + k * 30, (k + 3) % 5, rc); });
+  if (bo) drawBorderCracks();
 }
-function panel(x, y, w, h, col = '#3a3a44') { rect(x, y, w, h, COL.panel); frame(x, y, w, h, col); }
+function panel(x, y, w, h, col = '#3a3a44') {
+  rect(x, y, w, h, COL.panel);
+  const neutral = col === '#3a3a44' || col === '#2a2a32' || col === '#2a2a32';
+  ornFrame(x, y, w, h, { trim: neutral ? '#6a5426' : col, L: h >= 40 && w >= 40 ? 6 : 3 });
+}
 function goto(s) { scene = s; selItem = null; selSkill = null; evoPick = null; SFX.click(); persist(); }
 function tabs(y = 4) {
   save.party.forEach((id, i) => btn(124 + i * 64, y, 60, 18, CLS[id].n, () => { tab = id; selItem = null; selSkill = null; SFX.click(); }, { sel: tab === id, badge: scene === 'skills' && (save.chars[id].sp > 0 || save.chars[id].stp > 0) }));
@@ -89,7 +144,7 @@ function drawCamp() {
       T('Lv ' + c.lvl, x + 40, qy + 20, COL.dim);
       if (c.lvl >= TUNE.evoLevel && !c.evo && Math.floor(gtime * 3) % 2) T('evolve!', x + 40, qy + 32, COL.gold);
       if (id === save.active) rect(x + 16, qy - 2, 4, 2, COL.white);
-    } else T(id === 'archer' ? 'Act I' : 'Act II', x + 40, qy + 14, COL.dark);
+    }
   });
   const anySp = save.party.some(id => save.chars[id].sp > 0 || save.chars[id].stp > 0);
   const anyEvo = save.party.some(id => save.chars[id].lvl >= TUNE.evoLevel && !save.chars[id].evo);
@@ -123,7 +178,7 @@ function claimForge() {
   selItem = { it }; SFX.lvl(); persist();
 }
 function drawItemCell(it, x, y, s, dim, sel) {
-  rect(x, y, s, s, '#0c0c10'); frame(x, y, s, s, sel ? '#ffffff' : RAR[it.rar].c + (dim ? '55' : 'cc'));
+  slotBox(x, y, s, s, sel ? '#ffffff' : RAR[it.rar].c + (dim ? '55' : 'cc'));
   drawIcon(itemIcon(it), x + (s - 16) / 2, y + (s - 16) / 2, 2, RAR[it.rar].c);
   if (dim) { ctx.globalAlpha = .6; rect(x + 1, y + 1, s - 2, s - 2, '#000'); ctx.globalAlpha = 1; }
 }
@@ -215,7 +270,7 @@ function drawParty() {
     panel(x, 26, 98, 258, got && id === save.active ? '#8a8a96' : '#26262e');
     const bob = got ? Math.floor(gtime * 2 + i) % 2 : 0;
     drawSpr(c ? charSpr(c) : CLS[id].spr, x + 25, 36 - bob, 4, got ? '' : 'dim');
-    if (!got) { T('?', x + 49, 100, COL.dark, 1, 'c'); T(id === 'archer' ? 'joins after' : 'joins after', x + 49, 120, COL.dark, 1, 'c'); T(id === 'archer' ? 'Act I' : 'Act II', x + 49, 133, COL.dark, 1, 'c'); return; }
+    if (!got) { T('?', x + 49, 110, COL.dark, 2, 'c'); return; }
     const s = calcStats(c);
     T(charName(c), x + 49, 92, COL.white, 1, 'c');
     T('Lv ' + c.lvl, x + 49, 105, COL.dim, 1, 'c');

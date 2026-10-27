@@ -9,13 +9,17 @@ const STRIP = TOUCH ? 76 : 0;
 const LH = AH + STRIP;
 const cv = document.getElementById('c');
 const ctx = cv.getContext('2d');
-cv.width = LW; cv.height = LH;
-ctx.imageSmoothingEnabled = false;
+const RM = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) || /[?&]calm/.test(Q);
+// The canvas covers the whole window at an integer pixel scale. The 320px arena sits in the middle (OX, OY);
+// everything outside it is the black void that bosses and cracks can spill onto.
+let VW = LW, VH = LH, OX = 0, OY = 0, PXS = 1;
 function resize() {
   const dpr = window.devicePixelRatio || 1;
   const s = Math.max(1, Math.floor(Math.min(innerWidth * dpr / LW, innerHeight * dpr / LH)));
-  cv.style.width = (LW * s / dpr) + 'px';
-  cv.style.height = (LH * s / dpr) + 'px';
+  PXS = s; VW = Math.ceil(innerWidth * dpr / s); VH = Math.ceil(innerHeight * dpr / s);
+  cv.width = VW; cv.height = VH; ctx.imageSmoothingEnabled = false;
+  cv.style.width = (VW * s / dpr) + 'px'; cv.style.height = (VH * s / dpr) + 'px';
+  OX = Math.floor((VW - LW) / 2); OY = Math.floor((VH - LH) / 2);
 }
 addEventListener('resize', resize); resize();
 
@@ -43,7 +47,8 @@ const PAL = {
   y:'#e8c25a', Y:'#a8842e', r:'#d8464a', R:'#8a2430', o:'#a8703a', O:'#6b4424',
   h:'#5fae5f', H:'#2f6e3c', l:'#b8ffc8', b:'#4f7fd8', B:'#2a3f8a', p:'#9a5fd0', P:'#5a3080',
   c:'#9fe6f4', C:'#3a8aa8', f:'#ff9a3a', F:'#ffe08a', u:'#d8d0b8', U:'#8a8270', v:'#c070ff',
-  n:'#2c2c36', m:'#141018', e:'#ff4060', t:'#e86aa0'
+  n:'#2c2c36', m:'#141018', e:'#ff4060', t:'#e86aa0',
+  '1':'#ffb04a', '2':'#9cff6a', '3':'#ff4a5a', '4':'#e8e0ff'
 };
 const COL = { white:'#f2f2f2', dim:'#8a8a96', dark:'#45454f', gold:'#ffd35a', red:'#ff5a5a', green:'#7ee07e', blue:'#7aa8ff', panel:'#0b0b0e', line:'#2c2c34' };
 
@@ -432,6 +437,14 @@ const SFX = {
   win() { [523, 659, 784, 659, 1046].forEach((f, i) => tone(f, .12, 'square', .14, 0, i * .09)); },
   lose() { [392, 330, 262, 196].forEach((f, i) => tone(f, .18, 'triangle', .2, 0, i * .14)); },
   tick() { tone(1200, .015, 'square', .05); },
+  rumble() { tone(55, .9, 'sawtooth', .16, -15); noise(.5, .18, 180); },
+  crack() { noise(.07, .4, 3200); tone(900 + rnd(400), .05, 'square', .08, -600); },
+  shatter() { noise(.5, .5, 2400); [2100, 1600, 2500, 1300, 1900].forEach((f, i) => tone(f, .1, 'square', .07, -900, i * .035)); tone(70, .55, 'sawtooth', .28, -30); },
+  land() { noise(.35, .55, 260); tone(58, .35, 'sine', .45, -25); },
+  roar() { tone(98, .75, 'sawtooth', .2, -45); tone(147, .6, 'square', .1, -70, .06); noise(.5, .3, 650); },
+  morph() { [880, 660, 440, 330].forEach((f, i) => tone(f, .09, 'square', .1, 0, i * .05)); noise(.25, .25, 4000, .2); },
+  bossDie() { tone(220, .9, 'sawtooth', .22, -190); noise(.5, .45, 1200); [1760, 1320, 990, 740].forEach((f, i) => tone(f, .12, 'square', .08, 0, .25 + i * .07)); },
+  reform() { [392, 523, 659, 784, 1046, 1318].forEach((f, i) => tone(f, .12, 'square', .11, 0, i * .06)); noise(.3, .15, 5000, .35); },
 };
 // ================= game data =================
 const ORDER = ['warrior', 'archer', 'mage'];
@@ -504,7 +517,7 @@ const ACTS = [
 const LEVELS = [
   { n: 'Slime Meadow', w: [['slime'], ['slime', 'slime'], ['bigslime']] },
   { n: 'Bat Cave', w: [['bat', 'bat'], ['bat', 'slime', 'bat'], ['bat', 'bat', 'bat']] },
-  { n: 'Goblin Camp', w: [['goblin'], ['goblin', 'goblin'], ['goblin', 'gobchief', 'goblin']] },
+  { n: 'Goblin Camp', w: [['goblin'], ['goblin', 'goblin'], ['gobchief']] },
   { n: 'Spore Grove', w: [['shroom', 'shroom'], ['shroom', 'shroom', 'shroom'], ['shroom', 'wolf', 'shroom']] },
   { n: 'Wolf Den', w: [['wolf'], ['wolf', 'wolf'], ['wolf', 'wolf', 'wolf']] },
   { n: 'Elder Root', w: [['wolf', 'shroom'], ['shroom', 'wolf', 'shroom'], ['treant']] },
@@ -627,7 +640,7 @@ function startLevel(li) {
   const n = save.party.length;
   B = { li, act: Math.floor(li / 3), wave: 0, foes: [], units: [], t: 0, mk: 0, md: 1, zc: .5, cd: 0, state: 'intro', st: 1.0,
     fx: [], parts: [], nums: [], proj: [], shake: 0, hitstop: 0, loot: [], xp: 0, streak: 0, perf: 0, target: 0,
-    buff: { dmg: 0, spd: 0, heal: 0 }, gobUsed: {}, label: null, flash: null, banner: null, paused: false, msgs: [] };
+    buff: { dmg: 0, spd: 0, heal: 0 }, gobUsed: {}, label: null, flash: null, banner: null, paused: false, msgs: [], quake: 0, zBase: .5, boss: null, trail: [], crackFx: null, barShake: 0 };
   B.units = save.party.map((id, i) => {
     const c = save.chars[id], s = calcStats(c), [x, y] = PPOS[n][i];
     return { id, c, s, hp: s.hp, max: s.hp, x, y, ox: -60, lt: 0, hurt: 0, atkT: rnd(.4, 1.2), dead: false, guard: 0, spr: charSpr(c) };
@@ -645,17 +658,18 @@ function spawnWave(w) {
     const T = FOES[k], L = B.li + 1, [x, y] = FPOS[n][i];
     const hp = Math.round(TUNE.foeHp * Math.pow(TUNE.foeHpGrow, L - 1) * T.hp);
     return { k, T, L, hp, max: hp, dmg: TUNE.foeDmg * Math.pow(TUNE.foeDmgGrow, L - 1) * T.dmg, timer: T.per * rnd(.7, 1.1) + .9, wind: 0,
-      x, y, ox: 90 + i * 12, flash: 0, kx: 0, dead: false, burnT: 0, burnDps: 0, burnAcc: 0, chill: 0, freeze: 0, lt: 0, atk: 0, reviveT: 0, seed: rnd(10) };
+      x, y, spr: T.spr, sc: T.sc, ox: 90 + i * 12, flash: 0, kx: 0, dead: false, burnT: 0, burnDps: 0, burnAcc: 0, chill: 0, freeze: 0, lt: 0, atk: 0, reviveT: 0, seed: rnd(10) };
   });
   B.target = B.foes.findIndex(f => f.T.boss) >= 0 ? B.foes.findIndex(f => f.T.boss) : 0;
   B.gobUsed = {};
+  const bf = B.foes.find(f => f.T.boss && BOSS[f.k]); if (bf) bossStart(bf);
   const tip = keys.map(k => FOE_TIPS[k]).find(Boolean);
   if (tip && w === 0) B.tip = { txt: tip, t: 3.5 };
 }
 const activeUnit = () => B.units.find(u => u.id === save.active && !u.dead);
 const liveFoes = () => B.foes.filter(f => !f.dead);
 function sprSize(key, sc) { const r = SPR[key]; return [r[0].length * sc, r.length * sc]; }
-function foeCenter(f) { const [w, h] = sprSize(f.T.spr, f.T.sc); return [f.x + f.ox + f.kx, f.y - h / 2 - (f.T.fly ? 10 : 0)]; }
+function foeCenter(f) { const [w, h] = sprSize(f.spr, f.sc); return [f.x + f.ox + f.kx, f.y - h / 2 - (f.T.fly ? 10 : 0)]; }
 const PSC = 4;
 function unitCenter(u) { return [u.x + u.ox, u.y - 24]; }
 function getTarget() {
@@ -667,12 +681,14 @@ function zones() {
   const u = activeUnit(); if (!u) return { g: .2, p: .06 };
   const zm = 1 + (u.s.zone || 0) / 100;
   const g = clamp(TUNE.goodZone * u.s.goodZ * zm, .08, .6);
-  const p = clamp(TUNE.perfectZone * u.s.perfZ * zm, .02, g * .8);
-  return { g, p };
+  const pat = bossPat(), bz = pat && pat.zone || 1;
+  const p = clamp(TUNE.perfectZone * u.s.perfZ * zm * bz, .02, g * .8);
+  return { g: g * bz, p };
 }
 function markerSpeed() {
   const u = activeUnit(); let v = TUNE.markerSpeed * (1 + .07 * B.act) * (u ? u.s.mark : 1);
   v *= 1 + .15 * liveFoes().filter(f => f.T.stare).length;
+  const pat = bossPat(); if (pat && pat.spd) v *= pat.spd;
   return v;
 }
 function switchTo(i) {
@@ -695,8 +711,9 @@ function strike() {
   B.flash = { q, t: .3, x: B.mk };
   if (q === 'perfect') { save.perfects++; B.streak++; B.perf++; save.bestStreak = Math.max(save.bestStreak, B.streak); }
   else if (q === 'miss') B.streak = 0;
-  B.label = { q, t: .7 };
-  B.zc = rnd(.18, .82);
+  B.label = { q, t: .7, x: B.mk };
+  B.zc = B.zBase = rnd(.18, .82);
+  if (q === 'miss') { B.barShake = .3; B.crackFx = { x: B.flash.x, t: .7, s: Math.floor(rnd(1000)) }; }
   if (q !== 'miss') save.tut = true;
   attack(u, q, true);
 }
@@ -749,22 +766,25 @@ function shoot(u, f, kind, cb) {
 }
 function hitFoe(f, dmg, info, u) {
   if (!f || f.dead) return;
+  if (f.inv) { const [cx, cy] = foeCenter(f); spark(cx, cy, '#ffffff', 60); return; }
   if (f.T.ghost && info.q === 'good') dmg *= .5;
   if (f.T.plated && info.q === 'good') dmg *= .6;
   dmg = Math.max(1, Math.round(dmg));
-  f.hp -= dmg; f.flash = .09; f.kx = info.q === 'perfect' ? 8 : info.q === 'splash' ? 2 : 4;
+  f.hp -= dmg; f.flash = B.boss && B.boss.f === f ? (info.manual ? .06 : Math.max(f.flash, 0)) : .09; f.kx = info.q === 'perfect' ? 8 : info.q === 'splash' ? 2 : 4;
   const [cx, cy] = foeCenter(f);
   const col = info.q === 'perfect' ? COL.gold : info.crit ? '#ff9a6a' : info.q === 'splash' ? COL.dim : COL.white;
   num(cx + rnd(-6, 6), cy - 10, (info.crit ? dmg + '!' : '' + dmg), col, info.q === 'perfect' && info.manual ? 2 : 1);
   const n = info.q === 'perfect' ? 16 : info.q === 'splash' ? 3 : 7;
-  const mc = PAL[SPR[f.T.spr][Math.floor(SPR[f.T.spr].length / 2)].replace(/\./g, '')[0]] || '#fff';
+  const mr = SPR[f.spr][Math.floor(SPR[f.spr].length / 2)].replace(/\./g, ''), mc = PAL[mr[Math.floor(mr.length / 2)]] || '#fff';
   for (let i = 0; i < n; i++) spark(cx, cy, i % 2 ? '#ffffff' : (info.q === 'perfect' ? COL.gold : mc), info.q === 'perfect' ? 150 : 90);
   if (u && u.s.steal) u.hp = Math.min(u.max, u.hp + dmg * u.s.steal);
   if (u && u.s.chill) { f.chill = 3; if (info.q === 'perfect' && info.manual) { f.freeze = u.s.freeze; f.wind = 0; } }
+  bossPhaseCheck(f);
   if (f.hp <= 0) killFoe(f);
 }
 function killFoe(f) {
-  f.hp = 0; f.dead = true; shatter(f.T.spr, foeCenter(f)[0], f.y - (f.T.fly ? 10 : 0), f.T.sc, f.T.outline); SFX.kill();
+  f.hp = 0; f.dead = true; shatter(f.spr, foeCenter(f)[0], f.y - (f.T.fly ? 10 : 0), f.sc, f.T.outline); SFX.kill();
+  bossKilled(f);
   B.shake = Math.max(B.shake, f.T.boss ? 7 : 2.5);
   if (f.T.revive && !f.revived) { f.reviveT = 1.3; return; }
   const xp = Math.round(5 * Math.pow(f.L, 1.1) * (f.T.boss ? 6 : 1)); B.xp += xp; save.kills++;
@@ -785,10 +805,12 @@ function killFoe(f) {
     setTimeout(SFX.drop, 120);
   }
 }
-function foeAttack(f) {
+function foeAttack(f, second) {
   f.atk++; f.lt = .2;
+  const pat = B.boss && B.boss.f === f ? bossPat() || {} : {};
+  if (pat.dbl && !second) f.dbl = .3;
   const alive = B.units.filter(u => !u.dead); if (!alive.length) return;
-  const slam = f.T.slam && f.atk % f.T.slam === 0;
+  const sl = pat.slam || f.T.slam, slam = sl && f.atk % sl === 0;
   let targets;
   if (slam) targets = alive;
   else {
@@ -822,8 +844,8 @@ function unitDie(u) {
 function num(x, y, txt, col, sc = 1) { B.nums.push({ x, y, txt, col, sc, t: 0 }); }
 function spark(x, y, col, sp = 90) { const a = rnd(Math.PI * 2), v = rnd(.3, 1) * sp; B.parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 40, t: 0, life: rnd(.25, .5), col, s: Math.random() < .3 ? 2 : 1, g: 260 }); }
 function shatter(key, cx, by, sc, outline) {
-  const rows = SPR[key], h = rows.length, w = rows[0].length, x0 = cx - w * sc / 2, y0 = by - h * sc;
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+  const rows = SPR[key], h = rows.length, w = rows[0].length, x0 = cx - w * sc / 2, y0 = by - h * sc, step = w > 24 ? 2 : 1;
+  for (let y = 0; y < h; y += step) for (let x = (y / step) % 2 && step > 1 ? 1 : 0; x < w; x += step) {
     const ch = rows[y][x]; if (ch === '.') continue;
     const px = x0 + x * sc, py = y0 + y * sc, a = Math.atan2(py - (by - h * sc / 2), px - cx) + rnd(-.4, .4), v = rnd(40, 140);
     B.parts.push({ x: px, y: py, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 60, t: 0, life: rnd(.4, .9), col: ch === 'K' && outline ? outline : PAL[ch], s: sc, g: 300 });
@@ -861,7 +883,8 @@ function updateBattle(dt) {
   if (B.banner) { B.banner.t += dt; if (B.banner.t > B.banner.dur) B.banner = null; }
   if (B.tip) { B.tip.t -= dt; if (B.tip.t <= 0) B.tip = null; }
   if (B.hitstop > 0) { B.hitstop -= dt; return; }
-  B.shake = Math.max(0, B.shake - dt * 30);
+  B.shake = Math.max(0, B.shake - dt * 30); B.quake = Math.max(0, B.quake - dt * 22); B.barShake = Math.max(0, B.barShake - dt);
+  if (B.crackFx) { B.crackFx.t -= dt; if (B.crackFx.t <= 0) B.crackFx = null; }
   // movement / anim decay
   for (const u of B.units) { u.ox += (0 - u.ox) * Math.min(1, dt * 8); u.lt = Math.max(0, u.lt - dt); u.hurt = Math.max(0, u.hurt - dt); }
   for (const f of B.foes) { f.ox += (0 - f.ox) * Math.min(1, dt * 7); f.kx += (0 - f.kx) * Math.min(1, dt * 14); f.flash -= dt; f.lt = Math.max(0, f.lt - dt); }
@@ -879,10 +902,11 @@ function updateBattle(dt) {
   if (B.flash) { B.flash.t -= dt; if (B.flash.t <= 0) B.flash = null; }
   if (B.label) { B.label.t -= dt; if (B.label.t <= 0) B.label = null; }
   if (B.paused) return;
+  updateBoss(dt);
   if (B.state === 'intro') { B.st -= dt; if (B.st <= 0) B.state = 'fight'; }
   if (B.state === 'clear') {
     B.st -= dt;
-    if (B.st <= 0) { if (B.wave < 2) { B.wave++; spawnWave(B.wave); B.state = 'fight'; banner('Wave ' + (B.wave + 1) + '/3', COL.white, .9); } else winLevel(); }
+    if (B.st <= 0) { if (B.wave < 2) { B.wave++; spawnWave(B.wave); if (!B.boss) { B.state = 'fight'; banner('Wave ' + (B.wave + 1) + '/3', COL.white, .9); } } else winLevel(); }
     return;
   }
   if (B.state === 'lose' || B.state === 'win') { if (B.st > 0) B.st -= dt; return; }
@@ -911,26 +935,277 @@ function updateBattle(dt) {
     if (f.burnT > 0) {
       f.burnT -= dt; f.burnAcc += f.burnDps * dt;
       if (Math.random() < .3) { const [cx, cy] = foeCenter(f); B.parts.push({ x: cx + rnd(-8, 8), y: cy + rnd(-4, 8), vx: 0, vy: -30, t: 0, life: .4, col: Math.random() < .5 ? '#ff9a3a' : '#ffe08a', s: 1, g: -20 }); }
-      if (f.burnAcc >= 1) { const d = Math.floor(f.burnAcc); f.burnAcc -= d; f.hp -= d; if (f.hp <= 0) { killFoe(f); continue; } }
+      if (f.burnAcc >= 1 && !f.inv) { const d = Math.floor(f.burnAcc); f.burnAcc -= d; f.hp -= d; bossPhaseCheck(f); if (f.hp <= 0) { killFoe(f); continue; } }
     }
+    if (f.inv) continue;
     if (f.freeze > 0) { f.freeze -= dt; continue; }
+    const bp = B.boss && B.boss.f === f ? bossPat() || {} : {};
     const rate = f.chill > 0 ? .6 : 1; f.chill -= dt;
-    if (f.wind > 0) { f.wind -= dt * rate; if (f.wind <= 0) { f.wind = 0; foeAttack(f); f.timer = f.T.per * rnd(.85, 1.15); } }
-    else { f.timer -= dt * rate; if (f.timer <= 0) { f.wind = f.T.wind; SFX.wind(); } }
+    if (f.wind > 0) { f.wind -= dt * rate; if (f.wind <= 0) { f.wind = 0; foeAttack(f); f.timer = f.T.per * (bp.per || 1) * rnd(.85, 1.15); } }
+    else { f.timer -= dt * rate; if (f.timer <= 0) { f.wind = f.T.wind * (bp.wind || 1); SFX.wind(); } }
     if (B.state !== 'fight') return;
   }
-  if (!liveFoes().length && !B.foes.some(f => f.reviveT > 0) && !B.proj.length && B.state === 'fight') {
+  if (!liveFoes().length && !B.foes.some(f => f.reviveT > 0) && !B.proj.length && B.state === 'fight' && (!B.boss || B.boss.st === 'done')) {
     B.state = 'clear'; B.st = 1.1; if (B.wave < 2) banner('Wave clear', COL.green, .9);
   }
 }
+// ================= boss fights =================
+// Act bosses break the arena: the border cracks and shatters, glowing cracks spread over the void,
+// the boss is drawn huge (upscaled to the party's pixel size) and spills out of the square.
+const BOSS = {
+  gobchief: { phases: 2, crack: '#ffb04a', ch: '1', lines: ['', 'The Chief rages!'],
+    pats: [{}, { per: .7, wind: .8, zone: .8, spd: 1.15, dbl: 1 }] },
+  treant: { phases: 3, crack: '#9cff6a', ch: '2', lines: ['', 'Roots tear the ground', 'The forest screams'],
+    pats: [{}, { per: .85, zone: .85, spd: 1.1, drift: .12 }, { per: .7, wind: .75, zone: .72, spd: 1.2, drift: .22, slam: 2 }] },
+  darkknight: { phases: 3, crack: '#ff4a5a', ch: '3', lines: ['', 'The armor splits', 'Black flame'],
+    pats: [{}, { per: .8, zone: .8, spd: 1.15, dbl: 1 }, { per: .65, wind: .7, zone: .68, spd: 1.3, blink: 1, dbl: 1 }] },
+  mirror: { phases: 4, crack: '#e8e0ff', ch: '4', lines: ['', 'Reality inverts', 'Your timing is mine', 'Break the reflection'],
+    pats: [{}, { per: .85, zone: .85, spd: 1.1, invert: 1 }, { per: .75, zone: .75, spd: 1.2, drift: .18, rev: 1 },
+      { per: .6, wind: .7, zone: .65, spd: 1.35, drift: .25, blink: 1, dbl: 1, invert: 1 }] },
+};
+const BOSS_POS = [282, 246];
+// pixel-art upscalers (Scale2x / Scale3x) so a 12px sprite becomes 36-48px at the same pixel size as the party
+function scale2x(r) {
+  const h = r.length, w = r[0].length, g = (x, y) => (x < 0 || y < 0 || x >= w || y >= h) ? '.' : r[y][x], o = [];
+  for (let y = 0; y < h; y++) {
+    let a = '', b = '';
+    for (let x = 0; x < w; x++) {
+      const P = g(x, y), A = g(x, y - 1), Bq = g(x + 1, y), C = g(x - 1, y), D = g(x, y + 1);
+      a += (C === A && C !== D && A !== Bq ? A : P) + (A === Bq && A !== C && Bq !== D ? Bq : P);
+      b += (D === C && D !== Bq && C !== A ? C : P) + (Bq === D && Bq !== A && D !== C ? D : P);
+    }
+    o.push(a, b);
+  }
+  return o;
+}
+function scale3x(r) {
+  const h = r.length, w = r[0].length, g = (x, y) => (x < 0 || y < 0 || x >= w || y >= h) ? '.' : r[y][x], o = [];
+  for (let y = 0; y < h; y++) {
+    let r0 = '', r1 = '', r2 = '';
+    for (let x = 0; x < w; x++) {
+      const A = g(x - 1, y - 1), Bq = g(x, y - 1), C = g(x + 1, y - 1), D = g(x - 1, y), E = g(x, y), F = g(x + 1, y), G = g(x - 1, y + 1), H = g(x, y + 1), I = g(x + 1, y + 1);
+      if (Bq !== H && D !== F) {
+        r0 += (D === Bq ? D : E) + ((D === Bq && E !== C) || (Bq === F && E !== A) ? Bq : E) + (Bq === F ? F : E);
+        r1 += ((D === Bq && E !== G) || (D === H && E !== A) ? D : E) + E + ((Bq === F && E !== I) || (H === F && E !== C) ? F : E);
+        r2 += (D === H ? D : E) + ((D === H && E !== I) || (H === F && E !== G) ? H : E) + (H === F ? F : E);
+      } else { r0 += E + E + E; r1 += E + E + E; r2 += E + E + E; }
+    }
+    o.push(r0, r1, r2);
+  }
+  return o;
+}
+function bossSprKey(k, ph) {
+  const key = 'boss_' + k + '_' + ph; if (SPR[key]) return key;
+  const D = BOSS[k], last = ph >= D.phases - 1 && ph > 0;
+  const rows = (last ? scale2x(scale2x(SPR[FOES[k].spr])) : scale3x(SPR[FOES[k].spr])).map(r => r.split(''));
+  const h = rows.length, w = rows[0].length;
+  let seed = 7 + ph * 13 + k.length; const R = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  if (ph > 0) {
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (rows[y][x] === 'k') rows[y][x] = D.ch; // glowing eyes
+    for (let n = 0; n < ph * 4; n++) { // fissures through the body
+      let x = Math.floor(R() * w), y = Math.floor(R() * h), tries = 0;
+      while (rows[y][x] === '.' && tries++ < 60) { x = Math.floor(R() * w); y = Math.floor(R() * h); }
+      for (let s = 0; s < 10 + ph * 3; s++) {
+        if (rows[y] && rows[y][x] && rows[y][x] !== '.') rows[y][x] = D.ch;
+        const d = Math.floor(R() * 4); x += d === 0 ? 1 : d === 1 ? -1 : 0; y += d === 2 ? 1 : d === 3 ? -1 : 0;
+        x = clamp(x, 0, w - 1); y = clamp(y, 0, h - 1);
+      }
+    }
+  }
+  SPR[key] = rows.map(r => r.join(''));
+  return key;
+}
+const bossPat = () => B && B.boss && B.boss.st !== 'outro' && B.boss.st !== 'done' ? BOSS[B.boss.k].pats[B.boss.phase] : null;
+function bossFlash(col, dur = .35) { if (B.boss) B.boss.flash = { col, t: 0, dur }; }
+function quake(a) { B.quake = Math.max(B.quake || 0, a); }
+function addCracks(n, born) {
+  const bo = B.boss;
+  for (let i = 0; i < n; i++) {
+    const e = Math.floor(Math.random() * 4);
+    let x = e === 0 ? rnd(LW) : e === 1 ? LW : e === 2 ? rnd(LW) : 0, y = e === 0 ? 0 : e === 1 ? rnd(LH) : e === 2 ? LH : rnd(LH);
+    let a = [-Math.PI / 2, 0, Math.PI / 2, Math.PI][e] + rnd(-.7, .7);
+    mkCrack(x, y, a, 7 + Math.floor(rnd(9)), born + rnd(.25), 0);
+  }
+  function mkCrack(x, y, a, segs, b, depth) {
+    const px = [], base = [-Math.PI / 2, 0, Math.PI / 2, Math.PI];
+    for (let s = 0; s < segs; s++) {
+      const len = rnd(5, 13), nx = x + Math.cos(a) * len, ny = y + Math.sin(a) * len;
+      const steps = Math.ceil(Math.max(Math.abs(nx - x), Math.abs(ny - y)));
+      for (let k = 1; k <= steps; k++) px.push([Math.round(x + (nx - x) * k / steps), Math.round(y + (ny - y) * k / steps)]);
+      x = nx; y = ny; a += rnd(-.65, .65);
+      if (depth < 2 && Math.random() < .14) mkCrack(x, y, a + (Math.random() < .5 ? -1 : 1) * rnd(.5, 1.1), Math.max(3, segs - s - 2), b + px.length / 180, depth + 1);
+    }
+    bo.cracks.push({ px, born: b, w: depth === 0 ? 1 : 0 });
+  }
+}
+function borderShards(outward) {
+  // chunks of the arena frame: fly out (shatter) or fly back in (reform)
+  const per = [];
+  for (let x = 0; x < LW; x += 5) { per.push([x, 0, 0, -1]); per.push([x, AH - 1, 0, 1]); }
+  for (let y = 0; y < AH; y += 5) { per.push([0, y, -1, 0]); per.push([LW - 1, y, 1, 0]); }
+  for (const [x, y, nx, ny] of per) {
+    const a = Math.atan2(ny, nx) + rnd(-.8, .8), v = rnd(60, 220), s = Math.random() < .5 ? 2 : 3, col = pick(['#56506a', '#3a3444', '#d8b04a', '#8a8aa0', B.boss.D.crack]);
+    if (outward) B.parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, t: 0, life: rnd(.8, 1.6), col, s, g: 90 });
+    else { const life = rnd(.55, .9), d = v * life * .8; B.parts.push({ x: x + Math.cos(a) * d, y: y + Math.sin(a) * d, vx: -Math.cos(a) * d / life, vy: -Math.sin(a) * d / life, t: 0, life, col, s, g: 0 }); }
+  }
+}
+function bossStart(f) {
+  const D = BOSS[f.k]; if (!D) return;
+  f.spr = bossSprKey(f.k, 0); f.sc = PSC; f.x = BOSS_POS[0]; f.y = BOSS_POS[1]; f.ox = 0; f.drop = 1;
+  B.boss = { f, k: f.k, D, phase: 0, st: 'intro', t: 0, cracks: [], integ: 1, bcrack: 0, warp: 0, inv: false, flash: null, ev: {} };
+  B.state = 'boss'; B.tip = null; SFX.rumble();
+}
+function bossPhaseCheck(f) {
+  const bo = B.boss; if (!bo || bo.f !== f || bo.st !== 'fight') return;
+  const n = bo.D.phases; if (bo.phase >= n - 1) return;
+  const th = f.max * (1 - (bo.phase + 1) / n);
+  if (f.hp > th) return;
+  f.hp = Math.max(1, Math.ceil(th));
+  bo.phase++; bo.st = 'phase'; bo.t = 0; bo.ev = {}; f.wind = 0; f.inv = true; f.dbl = 0;
+  quake(12); bossFlash(bo.D.crack, .45); bo.warp = 1; SFX.roar();
+  addCracks(6 + bo.phase * 2, B.t);
+  banner(bo.D.lines[bo.phase] || ('Phase ' + (bo.phase + 1)), bo.D.crack, 1.5);
+  for (let i = 0; i < 30; i++) spark(...foeCenter(f), i % 2 ? bo.D.crack : '#ffffff', 220);
+}
+function bossKilled(f) {
+  const bo = B.boss; if (!bo || bo.f !== f) return false;
+  bo.st = 'outro'; bo.t = 0; bo.ev = {}; bo.inv = false; bo.warp = 0;
+  quake(14); bossFlash('#ffffff', .5); SFX.bossDie();
+  return true;
+}
+function updateBoss(dt) {
+  const bo = B.boss; if (!bo) return;
+  bo.t += dt; const t = bo.t, ev = bo.ev, f = bo.f;
+  if (bo.flash) { bo.flash.t += dt; if (bo.flash.t > bo.flash.dur) bo.flash = null; }
+  bo.warp = Math.max(0, bo.warp - dt * 1.1);
+  if (bo.st === 'intro') {
+    bo.bcrack = clamp(t / .9, 0, 1); quake(1 + t * 3);
+    if (t > .3 && !ev.c1) { ev.c1 = 1; SFX.crack(); } if (t > .6 && !ev.c2) { ev.c2 = 1; SFX.crack(); }
+    if (t > .9 && !ev.sh) { ev.sh = 1; bo.integ = .3; borderShards(true); bossFlash('#ffffff', .4); quake(10); addCracks(14, B.t); SFX.shatter(); }
+    if (t > .9) f.drop = Math.max(0, 1 - Math.pow((t - .9) / .75, 2));
+    if (t > 1.65 && !ev.land) {
+      ev.land = 1; f.drop = 0; quake(9); SFX.land(); banner(FOES[f.k].n, bo.D.crack, 1.4);
+      for (let i = 0; i < 24; i++) B.parts.push({ x: f.x + rnd(-70, 70), y: f.y, vx: rnd(-90, 90), vy: rnd(-90, -20), t: 0, life: rnd(.3, .7), col: i % 2 ? '#56506a' : bo.D.crack, s: 2, g: 260 });
+    }
+    if (t > 2.5) { bo.st = 'fight'; B.state = 'fight'; }
+  } else if (bo.st === 'phase') {
+    if (t > .45 && !ev.morph) { ev.morph = 1; f.spr = bossSprKey(bo.k, bo.phase); SFX.morph(); bossFlash('#ffffff', .25); bo.inv = !!BOSS[bo.k].pats[bo.phase].invert; quake(8); }
+    if (t > 1.3) { bo.st = 'fight'; f.inv = false; f.timer = f.T.per * .8; }
+  } else if (bo.st === 'outro') {
+    if (t > .5 && !ev.back) { ev.back = 1; borderShards(false); SFX.rumble(); }
+    if (t > .5) bo.integ = .3 + .7 * clamp((t - .5) / .85, 0, 1);
+    if (t > 1.4 && !ev.ref) { ev.ref = 1; bo.integ = 1; bossFlash('#ffffff', .3); SFX.reform(); }
+    if (t > 1.9) bo.st = 'done';
+  }
+  if (bo.st === 'fight' && !f.dead) {
+    const pat = bossPat() || {};
+    if (pat.drift && B.state === 'fight') B.zc = clamp(B.zBase + Math.sin(B.t * 1.6) * pat.drift, .12, .88);
+    if (pat.rev && B.state === 'fight') { B.revT = (B.revT || 1) - dt; if (B.revT <= 0) { B.md *= -1; B.revT = rnd(.7, 1.5); } }
+    if (f.dbl > 0) { f.dbl -= dt; if (f.dbl <= 0) { f.dbl = 0; foeAttack(f, true); } }
+    if (Math.random() < .5) { const [w, h] = sprSize(f.spr, f.sc); B.parts.push({ x: f.x + rnd(-w / 2, w / 2), y: f.y - rnd(h), vx: rnd(-8, 8), vy: rnd(-40, -15), t: 0, life: rnd(.4, .9), col: bo.phase ? bo.D.crack : '#3a3444', s: 1, g: -10 }); }
+  }
+}
+// ---------- drawing ----------
+const crackRetract = () => { const bo = B.boss; return bo.st === 'done' ? 0 : bo.st === 'outro' ? 1 - clamp((bo.t - .3) / 1.0, 0, 1) : 1; };
+function drawCracks() {
+  const bo = B.boss; if (!bo || !bo.cracks.length) return;
+  const rf = crackRetract(); if (rf <= 0) return;
+  const col = bo.D.crack;
+  bo.cracks.forEach((c, i) => {
+    const g = clamp((B.t - c.born) / .55, 0, 1) * rf, n = Math.floor(c.px.length * g); if (n <= 0) return;
+    const pulse = .16 + .1 * Math.sin(B.t * 4 + i) * (RM ? .3 : 1);
+    ctx.globalAlpha = pulse; ctx.fillStyle = col;
+    for (let k = 0; k < n; k++) { const [x, y] = c.px[k]; ctx.fillRect(x - 1, y - 1, 3, 3); }
+    ctx.globalAlpha = 1;
+    for (let k = 0; k < n; k++) { const [x, y] = c.px[k]; ctx.fillRect(x, y, 1, 1); if (c.w && k % 3 === 0) ctx.fillRect(x + 1, y, 1, 1); }
+    ctx.fillStyle = '#ffffff'; if (n > 2) { const [x, y] = c.px[n - 1]; ctx.fillRect(x, y, 1, 1); }
+  });
+}
+function borderSegVisible(i) { const bo = B && B.boss; if (!bo) return true; const h = ((i * 2654435761) >>> 0) % 1000 / 1000; return h < bo.integ; }
+function drawBorderCracks() {
+  const bo = B.boss; if (!bo || bo.st !== 'intro' || bo.integ < 1) return;
+  const pts = [[40, 0, 1], [150, 0, 1], [262, 0, 1], [319, 90, 2], [319, 210, 2], [96, 319, 3], [228, 319, 3], [0, 140, 4], [0, 250, 4]];
+  ctx.fillStyle = bo.D.crack;
+  pts.forEach(([x, y, e], i) => {
+    const n = Math.floor(14 * clamp(bo.bcrack * 1.6 - i * .07, 0, 1));
+    let cx = x, cy = y;
+    for (let k = 0; k < n; k++) {
+      ctx.fillRect(cx, cy, 1, 1);
+      if (e === 1 || e === 3) { cx += (k % 2 ? 1 : -1) * (1 + (k % 3 === 0)); cy += e === 1 ? 1 : -1; }
+      else { cy += (k % 2 ? 1 : -1) * (1 + (k % 3 === 0)); cx += e === 4 ? 1 : -1; }
+    }
+  });
+}
+function drawBossBar() {
+  const bo = B.boss; if (!bo || bo.st === 'intro' && bo.t < 1.65 || bo.st === 'outro' || bo.st === 'done') return;
+  const f = bo.f, x = 8, y = 21, w = 150;
+  T(FOES[f.k].n, x, y, bo.D.crack, 1, 'l', '#000');
+  for (let i = 0; i < bo.D.phases; i++) { const px = x + w - 4 - (bo.D.phases - 1 - i) * 7, on = i <= bo.phase; rect(px + 1, y + 1, 3, 1, on ? bo.D.crack : '#2a2a32'); rect(px, y + 2, 5, 1, on ? bo.D.crack : '#2a2a32'); rect(px + 1, y + 3, 3, 1, on ? bo.D.crack : '#2a2a32'); rect(px + 2, y, 1, 5, on ? bo.D.crack : '#2a2a32'); }
+  rect(x - 1, y + 12, w + 2, 6, '#3a3444'); rect(x, y + 13, w, 4, '#120e14');
+  rect(x, y + 13, Math.round(w * clamp(f.hp / f.max, 0, 1)), 4, f.inv ? '#ffffff' : '#ff5a5a');
+  rect(x, y + 13, Math.round(w * clamp(f.hp / f.max, 0, 1)), 1, '#ffa0a0');
+  for (let i = 1; i < bo.D.phases; i++) rect(x + Math.round(w * (1 - i / bo.D.phases)), y + 12, 1, 6, bo.D.crack);
+}
+let warpBuf = null;
+function drawBossOverlay() {
+  const bo = B && B.boss; if (!bo) return;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  if (bo.inv) {
+    if (!RM) { ctx.globalCompositeOperation = 'difference'; ctx.fillStyle = '#ffffff'; ctx.fillRect(OX, OY, LW, AH); ctx.globalCompositeOperation = 'source-over'; }
+    else { ctx.globalAlpha = .12; ctx.fillStyle = bo.D.crack; ctx.fillRect(OX, OY, LW, AH); ctx.globalAlpha = 1; }
+  }
+  if (bo.warp > 0 && !RM) {
+    if (!warpBuf || warpBuf.width !== VW || warpBuf.height !== VH) { warpBuf = document.createElement('canvas'); warpBuf.width = VW; warpBuf.height = VH; }
+    const g = warpBuf.getContext('2d'); g.clearRect(0, 0, VW, VH); g.drawImage(cv, 0, 0);
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, VW, VH);
+    const amp = bo.warp * 6;
+    for (let y = 0; y < VH; y += 2) ctx.drawImage(warpBuf, 0, y, VW, 2, Math.round(Math.sin(y * .06 + B.t * 18) * amp), y, VW, 2);
+  }
+  if (bo.flash) { const k = bo.flash.t / bo.flash.dur; ctx.globalAlpha = (1 - k) * (RM ? .2 : .75); ctx.fillStyle = bo.flash.col; ctx.fillRect(0, 0, VW, VH); ctx.globalAlpha = 1; }
+}
 // ================= UI / scenes =================
 let scene = 'title', UI = [], mouse = { x: -1, y: -1 }, msgQueue = [], tab = 'warrior', selItem = null, selSkill = null, evoPick = null, confirmNew = 0, gtime = 0;
+// ---------- fantasy pixel frames: carved stone + gilded filigree ----------
+const STONE = { d: '#121016', m: '#1e1a24', l: '#3a3444', h: '#56506a' };
+const GILD = { d: '#5a4018', m: '#9a7428', l: '#d8b04a', h: '#fff0a0' };
+function gem(x, y, c) { // 5x5 cut gem in a gold setting, top-left at x,y
+  rect(x + 2, y, 1, 1, GILD.m); rect(x + 1, y + 1, 1, 1, GILD.m); rect(x + 3, y + 1, 1, 1, GILD.m); rect(x, y + 2, 1, 1, GILD.m); rect(x + 4, y + 2, 1, 1, GILD.m);
+  rect(x + 1, y + 3, 1, 1, GILD.d); rect(x + 3, y + 3, 1, 1, GILD.d); rect(x + 2, y + 4, 1, 1, GILD.d);
+  rect(x + 2, y + 1, 1, 3, c); rect(x + 1, y + 2, 3, 1, c); rect(x + 2, y + 1, 1, 1, '#ffffff');
+}
+function filigree(x, y, sx, sy, col, L) { // gilded corner bracket with a little curl
+  for (let i = 0; i < L; i++) { rect(x + sx * i, y, 1, 1, col); rect(x, y + sy * i, 1, 1, col); }
+  rect(x + sx * 2, y + sy * 2, 1, 1, col); rect(x + sx * 3, y + sy * 2, 1, 1, col); rect(x + sx * 2, y + sy * 3, 1, 1, col);
+  if (L > 6) { rect(x + sx * (L - 1), y + sy, 1, 1, col); rect(x + sx, y + sy * (L - 1), 1, 1, col); }
+}
+function ornFrame(x, y, w, h, o = {}) {
+  const trim = o.trim || GILD.m, L = o.L || (Math.min(w, h) >= 40 ? 7 : 4);
+  rect(x, y, w, 1, STONE.h); rect(x, y, 1, h, STONE.h); rect(x, y + h - 1, w, 1, STONE.l); rect(x + w - 1, y, 1, h, STONE.l);
+  rect(x + 1, y + 1, w - 2, 1, STONE.d); rect(x + 1, y + h - 2, w - 2, 1, STONE.d); rect(x + 1, y + 1, 1, h - 2, STONE.d); rect(x + w - 2, y + 1, 1, h - 2, STONE.d);
+  filigree(x + 1, y + 1, 1, 1, trim, L); filigree(x + w - 2, y + 1, -1, 1, trim, L); filigree(x + 1, y + h - 2, 1, -1, trim, L); filigree(x + w - 2, y + h - 2, -1, -1, trim, L);
+  if (o.mid && w >= 90) for (const yy of [y, y + h - 1]) { const cx = x + Math.floor(w / 2); rect(cx - 6, yy, 3, 1, trim); rect(cx + 4, yy, 3, 1, trim); rect(cx - 1, yy - 1, 3, 3, STONE.d); rect(cx, yy - 1, 1, 3, trim); rect(cx - 1, yy, 3, 1, trim); }
+  if (o.gem) { gem(x - 2, y - 2, o.gem); gem(x + w - 3, y - 2, o.gem); gem(x - 2, y + h - 3, o.gem); gem(x + w - 3, y + h - 3, o.gem); }
+}
+function ornDivider(x, y, w, col = GILD.m) {
+  const cx = x + Math.floor(w / 2);
+  for (let i = x + 4; i < x + w - 4; i += 2) rect(i, y, 1, 1, i % 4 ? STONE.l : col);
+  rect(x, y, 2, 1, col); rect(x + w - 2, y, 2, 1, col); rect(x + 2, y - 1, 1, 1, col); rect(x + w - 3, y - 1, 1, 1, col);
+  rect(cx - 2, y - 2, 5, 5, '#000'); gem(cx - 2, y - 2, col === GILD.m ? '#7a5cff' : col);
+}
+function slotBox(x, y, w, h, accent) { // inset stone slot
+  rect(x, y, w, h, '#0c0a10'); rect(x, y, w, 1, STONE.d); rect(x, y, 1, h, STONE.d); rect(x, y + h - 1, w, 1, STONE.l); rect(x + w - 1, y, 1, h, STONE.l);
+  if (accent) { frame(x, y, w, h, accent); rect(x, y, 1, 1, '#000'); rect(x + w - 1, y, 1, 1, '#000'); rect(x, y + h - 1, 1, 1, '#000'); rect(x + w - 1, y + h - 1, 1, 1, '#000'); rect(x + 1, y + 1, 1, 1, accent); rect(x + w - 2, y + 1, 1, 1, accent); }
+}
 function btn(x, y, w, h, label, fn, o = {}) {
   const hov = !o.dis && mouse.x >= x && mouse.x < x + w && mouse.y >= y && mouse.y < y + h;
-  rect(x, y, w, h, o.fill || (hov ? '#1c1c24' : '#0e0e12'));
-  frame(x, y, w, h, o.dis ? '#24242c' : o.sel ? '#ffffff' : hov ? '#9a9aa6' : (o.border || '#3a3a44'));
+  const edge = o.dis ? '#221e28' : o.sel ? GILD.l : hov ? '#9a8aa8' : (o.border || STONE.h);
+  rect(x, y, w, h, o.fill || (hov ? '#221c2a' : '#141118'));
+  rect(x + 1, y + 1, w - 2, 1, o.dis ? '#18151c' : '#2e2838'); rect(x + 1, y + h - 2, w - 2, 1, '#0a080c');
+  frame(x, y, w, h, edge);
+  for (const [cx, cy] of [[x, y], [x + w - 1, y], [x, y + h - 1], [x + w - 1, y + h - 1]]) rect(cx, cy, 1, 1, '#000');
+  if (!o.dis && h >= 16) { const rc = o.sel ? GILD.h : GILD.m; rect(x + 2, y + 2, 1, 1, rc); rect(x + w - 3, y + 2, 1, 1, rc); rect(x + 2, y + h - 3, 1, 1, rc); rect(x + w - 3, y + h - 3, 1, 1, rc); }
   if (label) T(label, x + w / 2, y + Math.floor((h - 10) / 2), o.dis ? COL.dark : (o.col || COL.white), o.sc || 1, 'c');
-  if (o.badge) rect(x + w - 5, y + 2, 3, 3, COL.gold);
+  if (o.badge) gem(x + w - 7, y + 2, COL.gold);
   if (!o.dis && fn) UI.push({ x, y, w, h, fn });
 }
 function hit(x, y, w, h, fn) { UI.push({ x, y, w, h, fn }); }
@@ -939,13 +1214,33 @@ function corners(x, y, w, h, col, l = 5) {
   rect(x, y, l, 1, col); rect(x, y, 1, l, col); rect(x + w - l, y, l, 1, col); rect(x + w - 1, y, 1, l, col);
   rect(x, y + h - 1, l, 1, col); rect(x, y + h - l, 1, l, col); rect(x + w - l, y + h - 1, l, 1, col); rect(x + w - 1, y + h - l, 1, l, col);
 }
-function drawArena(accent = '#3a3a44') {
+// tiny runes carved into the arena edge
+const RUNES = [[0b010, 0b111, 0b010, 0b010, 0b010], [0b101, 0b110, 0b100, 0b110, 0b101], [0b111, 0b001, 0b010, 0b100, 0b111], [0b100, 0b110, 0b101, 0b110, 0b100], [0b011, 0b100, 0b010, 0b001, 0b110]];
+function rune(x, y, r, col) { RUNES[r].forEach((m, yy) => { for (let xx = 0; xx < 3; xx++) if (m & (4 >> xx)) rect(x + xx, y + yy, 1, 1, col); }); }
+function drawArena(accent = GILD.m) {
+  const bo = scene === 'battle' && B && B.boss;
+  if (bo) drawCracks();
   rect(0, 0, LW, LH, '#000');
-  ctx.fillStyle = '#111115';
+  ctx.fillStyle = '#121117';
   for (let y = 8; y < AH; y += 16) for (let x = 8; x < LW; x += 16) ctx.fillRect(x, y, 1, 1);
-  frame(0, 0, LW, AH, '#202028'); corners(0, 0, LW, AH, accent, 8);
+  if (bo && bo.integ < 1) { // shattered border: only jagged remnants
+    let i = 0;
+    for (let x = 0; x < LW; x += 8, i++) { if (borderSegVisible(i)) { rect(x, 0, 8, 1, STONE.h); rect(x, 1, 8, 1, STONE.d); } if (borderSegVisible(i + 97)) { rect(x, AH - 1, 8, 1, STONE.l); rect(x, AH - 2, 8, 1, STONE.d); } }
+    for (let y = 0; y < AH; y += 8, i++) { if (borderSegVisible(i + 211)) { rect(0, y, 1, 8, STONE.h); rect(1, y, 1, 8, STONE.d); } if (borderSegVisible(i + 307)) { rect(LW - 1, y, 1, 8, STONE.l); rect(LW - 2, y, 1, 8, STONE.d); } }
+    if (bo.integ > .95) ornFrame(0, 0, LW, AH, { trim: accent, L: 12, mid: true });
+    return;
+  }
+  ornFrame(0, 0, LW, AH, { trim: accent, L: 12, mid: true });
+  for (const [x, y] of [[2, 2], [LW - 7, 2], [2, AH - 7], [LW - 7, AH - 7]]) gem(x, y, accent === GILD.m ? '#7a5cff' : accent);
+  const rc = '#3a3022';
+  [0, 1, 2].forEach(k => { rune(3, 120 + k * 30, (k + 1) % 5, rc); rune(LW - 6, 120 + k * 30, (k + 3) % 5, rc); });
+  if (bo) drawBorderCracks();
 }
-function panel(x, y, w, h, col = '#3a3a44') { rect(x, y, w, h, COL.panel); frame(x, y, w, h, col); }
+function panel(x, y, w, h, col = '#3a3a44') {
+  rect(x, y, w, h, COL.panel);
+  const neutral = col === '#3a3a44' || col === '#2a2a32' || col === '#2a2a32';
+  ornFrame(x, y, w, h, { trim: neutral ? '#6a5426' : col, L: h >= 40 && w >= 40 ? 6 : 3 });
+}
 function goto(s) { scene = s; selItem = null; selSkill = null; evoPick = null; SFX.click(); persist(); }
 function tabs(y = 4) {
   save.party.forEach((id, i) => btn(124 + i * 64, y, 60, 18, CLS[id].n, () => { tab = id; selItem = null; selSkill = null; SFX.click(); }, { sel: tab === id, badge: scene === 'skills' && (save.chars[id].sp > 0 || save.chars[id].stp > 0) }));
@@ -1014,7 +1309,7 @@ function drawCamp() {
       T('Lv ' + c.lvl, x + 40, qy + 20, COL.dim);
       if (c.lvl >= TUNE.evoLevel && !c.evo && Math.floor(gtime * 3) % 2) T('evolve!', x + 40, qy + 32, COL.gold);
       if (id === save.active) rect(x + 16, qy - 2, 4, 2, COL.white);
-    } else T(id === 'archer' ? 'Act I' : 'Act II', x + 40, qy + 14, COL.dark);
+    }
   });
   const anySp = save.party.some(id => save.chars[id].sp > 0 || save.chars[id].stp > 0);
   const anyEvo = save.party.some(id => save.chars[id].lvl >= TUNE.evoLevel && !save.chars[id].evo);
@@ -1048,7 +1343,7 @@ function claimForge() {
   selItem = { it }; SFX.lvl(); persist();
 }
 function drawItemCell(it, x, y, s, dim, sel) {
-  rect(x, y, s, s, '#0c0c10'); frame(x, y, s, s, sel ? '#ffffff' : RAR[it.rar].c + (dim ? '55' : 'cc'));
+  slotBox(x, y, s, s, sel ? '#ffffff' : RAR[it.rar].c + (dim ? '55' : 'cc'));
   drawIcon(itemIcon(it), x + (s - 16) / 2, y + (s - 16) / 2, 2, RAR[it.rar].c);
   if (dim) { ctx.globalAlpha = .6; rect(x + 1, y + 1, s - 2, s - 2, '#000'); ctx.globalAlpha = 1; }
 }
@@ -1140,7 +1435,7 @@ function drawParty() {
     panel(x, 26, 98, 258, got && id === save.active ? '#8a8a96' : '#26262e');
     const bob = got ? Math.floor(gtime * 2 + i) % 2 : 0;
     drawSpr(c ? charSpr(c) : CLS[id].spr, x + 25, 36 - bob, 4, got ? '' : 'dim');
-    if (!got) { T('?', x + 49, 100, COL.dark, 1, 'c'); T(id === 'archer' ? 'joins after' : 'joins after', x + 49, 120, COL.dark, 1, 'c'); T(id === 'archer' ? 'Act I' : 'Act II', x + 49, 133, COL.dark, 1, 'c'); return; }
+    if (!got) { T('?', x + 49, 110, COL.dark, 2, 'c'); return; }
     const s = calcStats(c);
     T(charName(c), x + 49, 92, COL.white, 1, 'c');
     T('Lv ' + c.lvl, x + 49, 105, COL.dim, 1, 'c');
@@ -1191,8 +1486,7 @@ function drawBattle() {
   const A = ACTS[B.act];
   drawArena(A.c);
   ctx.save();
-  if (B.shake > 0) ctx.translate(Math.round(rnd(-B.shake, B.shake)), Math.round(rnd(-B.shake, B.shake)));
-  for (let x = 12; x < 308; x += 6) rect(x, 252, 3, 1, '#1a1a22');
+  const sk = B.shake * (RM ? .25 : 1); if (sk > 0) ctx.translate(Math.round(rnd(-sk, sk)), Math.round(rnd(-sk, sk)));
   const ents = [...B.units.map((u, i) => ({ y: u.y, d: () => drawUnit(u, i) })), ...B.foes.map((f, i) => ({ y: f.y, d: () => drawFoe(f, i) }))];
   ents.sort((a, b) => a.y - b.y).forEach(e => e.d());
   for (const p of B.proj) {
@@ -1228,23 +1522,23 @@ function drawUnit(u, i) {
 }
 function drawFoe(f, i) {
   if (f.dead) return;
-  const T_ = f.T, sc = T_.sc, [w, h] = sprSize(T_.spr, sc);
+  const T_ = f.T, sc = f.sc, [w, h] = sprSize(f.spr, sc), boss = B.boss && B.boss.f === f;
   const lx = f.lt > 0 ? -Math.round(Math.sin((1 - f.lt / .2) * Math.PI) * 18) : 0;
   const oy = f.wind > 0 ? -3 : 0, bob = T_.fly ? Math.round(Math.sin(B.t * 4 + f.seed) * 3) - 10 : Math.floor(B.t * 2 + f.seed) % 2;
-  const x = Math.round(f.x + f.ox + f.kx + lx - w / 2), y = f.y - h + oy + bob;
-  rect(f.x + f.ox - w / 2 + 6, f.y, w - 12, 2, '#1a1a22');
-  let outline = T_.outline || null;
+  const x = Math.round(f.x + f.ox + f.kx + lx - w / 2), y = f.y - h + oy + bob - Math.round((f.drop || 0) * 340);
+  rect(f.x + f.ox - w / 2 + 6, f.y, w - 12, boss ? 3 : 2, '#1a1a22');
+  let outline = boss && B.boss.phase > 0 ? B.boss.D.crack : T_.outline || null;
   if (f.wind > 0 && Math.floor(B.t * 14) % 2) outline = '#ff5a5a';
   if (f.freeze > 0) outline = '#9fe6f4';
   const alpha = T_.ghost ? .72 + Math.sin(B.t * 6 + f.seed) * .12 : 1;
-  drawSpr(T_.spr, x, y, sc, f.flash > 0 ? 'flash' : '', outline, alpha);
+  drawSpr(f.spr, x, y, sc, f.flash > 0 || (f.inv && Math.floor(B.t * 16) % 2) ? 'flash' : '', outline, alpha);
   const bw = T_.boss ? 46 : 28, by = y - 9;
-  bar(f.x + f.ox - bw / 2, by, bw, 3, f.hp / f.max, '#ff5a5a');
-  bar(f.x + f.ox - bw / 2, by + 4, bw, 1, f.wind > 0 ? 1 : 1 - f.timer / T_.per, f.wind > 0 ? '#ffffff' : '#7a3a3a', '#16161c');
+  if (!boss) bar(f.x + f.ox - bw / 2, by, bw, 3, f.hp / f.max, '#ff5a5a');
+  bar(f.x + f.ox - bw / 2, by + 4, bw, boss ? 2 : 1, f.wind > 0 ? 1 : 1 - f.timer / T_.per, f.wind > 0 ? '#ffffff' : '#7a3a3a', '#16161c');
   if (f.wind > 0) T('!', f.x + f.ox, by - 14, COL.red, 1, 'c', '#000');
   if (f.burnT > 0) rect(f.x + f.ox + bw / 2 + 2, by, 3, 3, '#ff9a3a');
   if (f.chill > 0) rect(f.x + f.ox + bw / 2 + 2, by + 4, 3, 3, '#9fe6f4');
-  if (i === B.target) corners(x - 4, y - 4, w + 8, h + 8, Math.floor(B.t * 4) % 2 ? COL.gold : '#b08a30', 4);
+  if (i === B.target && !boss) corners(x - 4, y - 4, w + 8, h + 8, Math.floor(B.t * 4) % 2 ? COL.gold : '#b08a30', 4);
   hit(x - 6, y - 12, w + 12, h + 16, () => { B.target = i; SFX.click(); });
 }
 function drawFx(e) {
@@ -1270,40 +1564,95 @@ function drawHud() {
   const A = ACTS[B.act];
   T(A.roman + '-' + (B.li % 3 + 1) + '  ' + LEVELS[B.li].n, 8, 6, A.c);
   T('Wave ' + (B.wave + 1) + '/3', 312, 6, COL.dim, 1, 'r');
-  let bx = 8; [['dmg', '#5a8cff', 'DMG+'], ['spd', '#5fd06a', 'SPD+'], ['heal', '#ff5a50', 'HEAL']].forEach(([k, c, n]) => { if (B.buff[k] > 0) { T(n, bx, 19, c); bx += textW(n) + 6; } });
+  drawBossBar();
+  let bx = 8, byy = B.boss ? 42 : 19; [['dmg', '#5a8cff', 'DMG+'], ['spd', '#5fd06a', 'SPD+'], ['heal', '#ff5a50', 'HEAL']].forEach(([k, c, n]) => { if (B.buff[k] > 0) { T(n, bx, byy, c); bx += textW(n) + 6; } });
   if (B.tip) T(B.tip.txt, 160, 34, COL.dim, 1, 'c');
   if (!save.tut && B.state === 'fight') { if (Math.floor(B.t * 2) % 2 === 0) T(TOUCH ? 'Tap STRIKE when the line is on gold' : 'Press J when the line is on gold', 160, 34, COL.gold, 1, 'c'); }
+  ornDivider(6, 252, 308, '#6a5426');
   // portraits
   B.units.forEach((u, i) => {
-    const x = 8 + i * 38, y = 256, act = u.id === save.active;
-    rect(x, y, 34, 22, '#0c0c10'); frame(x, y, 34, 22, act ? '#ffffff' : '#3a3a44');
+    const x = 8 + i * 38, y = 257, act = u.id === save.active;
+    slotBox(x, y, 34, 22, act ? TINT[u.id] : null);
     drawSpr(u.dead ? 'grave' : u.spr, x + 3, y + 4, 1, u.dead ? 'dim' : '');
     T('' + (i + 1), x + 21, y + 4, act ? COL.white : COL.dim);
-    bar(x + 2, y + 18, 30, 2, u.hp / u.max, u.dead ? '#333' : '#7ee07e');
+    bar(x + 3, y + 18, 28, 2, u.hp / u.max, u.dead ? '#333' : '#7ee07e', '#1a1620');
     hit(x, y, 34, 22, () => switchTo(i));
   });
   const au = activeUnit();
-  if (au) T(charName(au.c), 312, 258, COL.dim, 1, 'r');
-  if (B.label) {
-    const q = B.label.q, txt = q === 'perfect' ? 'PERFECT!' : q === 'good' ? 'Good' : 'Miss', col = q === 'perfect' ? COL.gold : q === 'good' ? COL.green : COL.dim;
-    T(txt, 206, 264 - (B.label.t > .6 ? 2 : 0), col, 1, 'c', '#000');
+  if (au) T(charName(au.c), 312, 259, TINT[au.id], 1, 'r');
+  drawTimingBar(au);
+  if (!TOUCH) T('J strike   1 2 3 swap   Esc menu', 160, 305, '#4a4452', 1, 'c');
+}
+const TINT = { warrior: '#ffd35a', archer: '#7ee07e', mage: '#b48cff' };
+function drawTimingBar(au) {
+  const W = 228, H = 12, Y = 285, ready = B.cd <= 0 && B.state === 'fight', { g, p } = zones();
+  const tint = au ? TINT[au.id] : '#8a8a96', pat = bossPat() || {};
+  const X = 46 + (B.barShake > 0 && !RM ? Math.round(rnd(-2, 2) * B.barShake / .3) : 0);
+  // beveled stone frame with gilded rivets, tinted per character
+  rect(X - 4, Y - 4, W + 8, H + 8, '#000');
+  rect(X - 3, Y - 3, W + 6, 1, '#56506a'); rect(X - 3, Y - 3, 1, H + 6, '#56506a');
+  rect(X - 3, Y + H + 2, W + 6, 1, '#24202c'); rect(X + W + 2, Y - 3, 1, H + 6, '#24202c');
+  rect(X - 2, Y - 2, W + 4, 1, '#3a3444'); rect(X - 2, Y + H + 1, W + 4, 1, '#16131a'); rect(X - 2, Y - 2, 1, H + 4, '#3a3444'); rect(X + W + 1, Y - 2, 1, H + 4, '#16131a');
+  frame(X - 1, Y - 1, W + 2, H + 2, ready ? tint : '#2e2a36');
+  for (const [rx, ry] of [[X - 5, Y - 5], [X + W + 2, Y - 5], [X - 5, Y + H + 2], [X + W + 2, Y + H + 2]]) { rect(rx, ry, 3, 3, '#6a5426'); rect(rx + 1, ry + 1, 1, 1, tint); rect(rx, ry, 1, 1, '#d8b04a'); }
+  // fill, faint tint
+  rect(X, Y, W, H, '#09080c'); ctx.globalAlpha = .08; rect(X, Y, W, H, tint); ctx.globalAlpha = 1;
+  // good zone with dithered edges
+  const gx = X + Math.round((B.zc - g / 2) * W), gw = Math.round(g * W), gc = ready ? '#2f6a3a' : '#1a2a1e', gl = ready ? '#3f8a4a' : '#22362a';
+  rect(gx + 3, Y + 2, gw - 6, H - 4, gc); rect(gx + 3, Y + 2, gw - 6, 1, gl);
+  for (let k = 0; k < 3; k++) for (let yy = Y + 2; yy < Y + H - 2; yy++) {
+    if ((yy + k) % (k === 0 ? 1 : k === 1 ? 2 : 3) === 0) { rect(gx + k, yy, 1, 1, gc); rect(gx + gw - 1 - k, yy, 1, 1, gc); }
   }
-  // timing bar
-  const X = 46, Y = 283, W = 228, H = 12, { g, p } = zones(), ready = B.cd <= 0 && B.state === 'fight';
-  rect(X, Y, W, H, '#0c0c10');
-  const gx = X + Math.round((B.zc - g / 2) * W), gw = Math.round(g * W), px = X + Math.round((B.zc - p / 2) * W), pw = Math.max(2, Math.round(p * W));
-  rect(gx, Y + 2, gw, H - 4, ready ? '#2a5a34' : '#1c2a20');
-  rect(px, Y + 1, pw, H - 2, ready ? COL.gold : '#5a4a20');
-  for (let k = 1; k < 8; k++) rect(X + Math.round(W * k / 8), Y + H - 2, 1, 2, '#2a2a32');
-  frame(X - 1, Y - 1, W + 2, H + 2, B.flash ? (B.flash.q === 'perfect' ? COL.gold : B.flash.q === 'good' ? COL.green : COL.red) : '#3a3a44');
-  if (!ready && B.state === 'fight' && au) bar(X, Y + H + 2, W, 1, 1 - B.cd / au.s.cd, '#5a5a66', '#000');
-  const mx = X + Math.round(B.mk * (W - 2));
-  rect(mx, Y - 4, 2, H + 8, ready ? '#ffffff' : '#6a6a74');
-  rect(mx - 1, Y - 4, 4, 1, ready ? '#ffffff' : '#6a6a74');
-  if (B.flash) { const fx = X + Math.round(B.flash.x * W), k = B.flash.t / .3; for (let i = 0; i < 6; i++) { const a = i * 1.047; rect(fx + Math.cos(a) * (1 - k) * 12, Y + 6 + Math.sin(a) * (1 - k) * 8, 2, 2, B.flash.q === 'perfect' ? COL.gold : '#ffffff'); } }
-  if (!TOUCH) { rect(14, Y - 2, 18, 16, '#16161c'); frame(14, Y - 2, 18, 16, ready ? '#ffffff' : '#3a3a44'); T('J', 23, Y + 1, ready ? COL.white : COL.dim, 1, 'c'); }
+  // perfect zone: pulse + shimmer (blinks in some boss phases)
+  const px = X + Math.round((B.zc - p / 2) * W), pw = Math.max(2, Math.round(p * W));
+  const hidden = pat.blink && Math.floor(B.t * 5) % 3 === 0;
+  if (!hidden) {
+    const pulse = RM ? 0 : (Math.sin(B.t * 8) + 1) / 2;
+    rect(px, Y + 1, pw, H - 2, ready ? (pulse > .6 ? '#ffe27a' : COL.gold) : '#5a4a20');
+    rect(px, Y + 1, pw, 1, ready ? '#fff4b8' : '#6a5a2a'); rect(px, Y + H - 2, pw, 1, ready ? '#c89a2a' : '#4a3a18');
+    if (ready) { for (let yy = Y + 1; yy < Y + H - 1; yy += 2) { rect(px - 1, yy, 1, 1, '#a8842e'); rect(px + pw, yy + 1, 1, 1, '#a8842e'); } }
+    if (ready && !RM) { const sx = px + Math.floor((B.t * 30) % (pw + 6)) - 3; if (sx >= px && sx < px + pw) rect(sx, Y + 2, 1, H - 4, '#ffffff'); }
+  }
+  // tick marks
+  for (let k = 1; k < 16; k++) { const tx = X + Math.round(W * k / 16), maj = k % 4 === 0; rect(tx, Y + H - (maj ? 3 : 2), 1, maj ? 3 : 2, maj ? '#4a4452' : '#2a2632'); rect(tx, Y, 1, maj ? 2 : 1, maj ? '#4a4452' : '#2a2632'); }
+  // hit flash
+  if (B.flash) {
+    const k = B.flash.t / .3, c = B.flash.q === 'perfect' ? '#ffffff' : B.flash.q === 'good' ? '#bfffbf' : '#ff5a5a';
+    ctx.globalAlpha = k * (RM ? .2 : .45); rect(X, Y, W, H, c); ctx.globalAlpha = 1;
+    const fx = X + Math.round(B.flash.x * W), n = B.flash.q === 'perfect' ? 12 : 6;
+    for (let i = 0; i < n; i++) { const a = i * Math.PI * 2 / n + .3, r = (1 - k) * (B.flash.q === 'perfect' ? 18 : 11); rect(fx + Math.round(Math.cos(a) * r), Y + 6 + Math.round(Math.sin(a) * r * .7), 2, 2, B.flash.q === 'perfect' ? (i % 2 ? COL.gold : '#ffffff') : B.flash.q === 'good' ? COL.green : '#ff5a5a'); }
+  }
+  // miss crack
+  if (B.crackFx) {
+    const cx = X + Math.round(B.crackFx.x * W), a = clamp(B.crackFx.t / .4, 0, 1), s = B.crackFx.s;
+    ctx.globalAlpha = a; let x = cx;
+    for (let yy = Y - 2; yy < Y + H + 2; yy++) { rect(x, yy, 1, 1, '#ff5a5a'); rect(x + 1, yy, 1, 1, '#000'); x += ((s >> (yy - Y + 2)) & 1) ? 1 : -1; if (yy === Y + 4) { rect(x - 2, yy + 1, 2, 1, '#ff5a5a'); rect(x - 4, yy + 2, 2, 1, '#ff5a5a'); } }
+    ctx.globalAlpha = 1;
+  }
+  // marker: a small pixel sword with a motion trail
+  if (B.state === 'fight' || B.state === 'intro') { B.trail.push(B.mk); if (B.trail.length > 6) B.trail.shift(); }
+  B.trail.forEach((m, i) => { ctx.globalAlpha = (i + 1) / B.trail.length * .35; rect(X + Math.round(m * (W - 2)), Y + 1, 2, H - 2, ready ? tint : '#4a4a54'); });
+  ctx.globalAlpha = 1;
+  const mx = X + Math.round(B.mk * (W - 2)), mc = ready ? '#ffffff' : '#6a6a74', hc = ready ? tint : '#4a4a54';
+  rect(mx, Y - 7, 2, 2, hc);           // pommel
+  rect(mx, Y - 5, 2, 2, '#8a6a3a');    // grip
+  rect(mx - 2, Y - 3, 6, 1, hc);       // crossguard
+  rect(mx, Y - 2, 2, H + 3, mc);       // blade
+  rect(mx, Y + H + 1, 1, 1, mc);       // tip
+  rect(mx + 1, Y - 2, 1, H + 3, ready ? '#c8c8d4' : '#55555e');
+  if (!ready && B.state === 'fight' && au) bar(X, Y + H + 4, W, 1, 1 - B.cd / au.s.cd, '#5a5a66', '#000');
+  // pop text in the game font
+  if (B.label) {
+    const q = B.label.q, k = 1 - B.label.t / .7, txt = q === 'perfect' ? 'Perfect!' : q === 'good' ? 'Good' : 'Miss';
+    const col = q === 'perfect' ? COL.gold : q === 'good' ? COL.green : '#ff6a6a', sc = q === 'perfect' && k < .5 ? 2 : 1;
+    const lx = clamp(X + Math.round((B.flash ? B.flash.x : B.label.x || .5) * W), 40, 280);
+    if (B.flash) B.label.x = B.flash.x;
+    ctx.globalAlpha = k > .7 ? (1 - k) / .3 : 1;
+    T(txt, lx, Y - 13 - sc * 6 - Math.round(k * 6) + (sc === 2 ? 0 : 6), col, sc, 'c', '#000');
+    ctx.globalAlpha = 1;
+  }
+  if (!TOUCH) { slotBox(14, Y - 2, 18, 16, ready ? tint : null); T('J', 23, Y + 1, ready ? COL.white : COL.dim, 1, 'c'); }
   if (B.streak >= 2) T('x' + B.streak, 306, Y + 1, COL.gold, 1, 'r');
-  if (!TOUCH) T('J strike   1 2 3 swap   Esc menu', 160, 304, '#3e3e48', 1, 'c');
 }
 function drawResult() {
   UI = UI.filter(() => false);
@@ -1335,7 +1684,7 @@ function drawStrip() {
   if (!TOUCH) return;
   rect(0, AH, LW, STRIP, '#000');
   const y = AH + 6, h = STRIP - 12;
-  if (scene === 'battle' && B && !B.paused && (B.state === 'fight' || B.state === 'intro' || B.state === 'clear')) {
+  if (scene === 'battle' && B && !B.paused && (B.state === 'fight' || B.state === 'intro' || B.state === 'clear' || B.state === 'boss')) {
     const ready = B.cd <= 0 && B.state === 'fight';
     btn(8, y, 196, h, 'STRIKE', strike, { sc: 2, col: ready ? COL.gold : COL.dim, border: ready ? COL.gold : '#3a3a44', fill: ready ? '#16140a' : '#0c0c10' });
     btn(210, y, 50, h, 'Swap', cycleUnit, { dis: B.units.filter(u => !u.dead).length < 2 });
@@ -1376,7 +1725,7 @@ addEventListener('keydown', e => {
     if (evoPick) evoPick = null; else if (scene === 'gear' || scene === 'skills' || scene === 'party') goto('camp');
   }
 });
-function toLogical(e) { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) * LW / r.width, y: (e.clientY - r.top) * LH / r.height }; }
+function toLogical(e) { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) * VW / r.width - OX, y: (e.clientY - r.top) * VH / r.height - OY }; }
 cv.addEventListener('pointerdown', e => {
   e.preventDefault(); audio(); mouse = toLogical(e);
   for (let i = UI.length - 1; i >= 0; i--) { const b = UI[i]; if (mouse.x >= b.x && mouse.x < b.x + b.w && mouse.y >= b.y && mouse.y < b.y + b.h) { b.fn(); return; } }
@@ -1387,7 +1736,11 @@ cv.addEventListener('contextmenu', e => e.preventDefault());
 document.addEventListener('visibilitychange', () => { if (document.hidden && B && B.state === 'fight') B.paused = true; persist(); });
 
 let last = performance.now();
-const WAM = window.WAM = { get save() { return save; }, get B() { return B; }, get scene() { return scene; }, startLevel, strike, zones, switchTo, onJ, TUNE, bot: 0, timeScale: 1, goto: s => { scene = s; } };
+function drawVoid() {
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, VW, VH); ctx.fillStyle = '#0e0d12';
+  for (let y = ((OY % 8) + 8) % 8; y < VH; y += 8) for (let x = ((OX % 8) + 8) % 8; x < VW; x += 8) ctx.fillRect(x, y, 1, 1);
+}
+const WAM = window.WAM = { toCss: (x, y) => { const r = cv.getBoundingClientRect(); return { x: r.left + (x + OX) * r.width / VW, y: r.top + (y + OY) * r.height / VH }; }, get save() { return save; }, get B() { return B; }, get scene() { return scene; }, startLevel, strike, zones, switchTo, onJ, TUNE, bot: 0, timeScale: 1, goto: s => { scene = s; } };
 function botTick() {
   // test helper only: WAM.bot = accuracy 0..1 auto-presses J for recordings/tests
   if (!WAM.bot || !B || B.state !== 'fight' || B.paused || B.cd > 0) return;
@@ -1403,6 +1756,9 @@ function loop(now) {
     if (scene === 'battle' && B) updateBattle(dt);
     UI = [];
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+    drawVoid();
+    const qa = scene === 'battle' && B ? B.quake * (RM ? .25 : 1) : 0;
+    ctx.setTransform(1, 0, 0, 1, OX + (qa ? Math.round(rnd(-qa, qa)) : 0), OY + (qa ? Math.round(rnd(-qa, qa)) : 0));
     if (scene === 'title') drawTitle();
     else if (scene === 'camp') drawCamp();
     else if (scene === 'gear') drawGear();
@@ -1411,6 +1767,7 @@ function loop(now) {
     else if (scene === 'msg') drawMsg();
     else if (scene === 'battle' && B) drawBattle();
     drawStrip();
+    if (scene === 'battle' && B) drawBossOverlay();
   } catch (err) { console.error(err); }
   requestAnimationFrame(loop);
 }

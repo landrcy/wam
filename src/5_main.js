@@ -3,8 +3,7 @@ function drawBattle() {
   const A = ACTS[B.act];
   drawArena(A.c);
   ctx.save();
-  if (B.shake > 0) ctx.translate(Math.round(rnd(-B.shake, B.shake)), Math.round(rnd(-B.shake, B.shake)));
-  for (let x = 12; x < 308; x += 6) rect(x, 252, 3, 1, '#1a1a22');
+  const sk = B.shake * (RM ? .25 : 1); if (sk > 0) ctx.translate(Math.round(rnd(-sk, sk)), Math.round(rnd(-sk, sk)));
   const ents = [...B.units.map((u, i) => ({ y: u.y, d: () => drawUnit(u, i) })), ...B.foes.map((f, i) => ({ y: f.y, d: () => drawFoe(f, i) }))];
   ents.sort((a, b) => a.y - b.y).forEach(e => e.d());
   for (const p of B.proj) {
@@ -40,23 +39,23 @@ function drawUnit(u, i) {
 }
 function drawFoe(f, i) {
   if (f.dead) return;
-  const T_ = f.T, sc = T_.sc, [w, h] = sprSize(T_.spr, sc);
+  const T_ = f.T, sc = f.sc, [w, h] = sprSize(f.spr, sc), boss = B.boss && B.boss.f === f;
   const lx = f.lt > 0 ? -Math.round(Math.sin((1 - f.lt / .2) * Math.PI) * 18) : 0;
   const oy = f.wind > 0 ? -3 : 0, bob = T_.fly ? Math.round(Math.sin(B.t * 4 + f.seed) * 3) - 10 : Math.floor(B.t * 2 + f.seed) % 2;
-  const x = Math.round(f.x + f.ox + f.kx + lx - w / 2), y = f.y - h + oy + bob;
-  rect(f.x + f.ox - w / 2 + 6, f.y, w - 12, 2, '#1a1a22');
-  let outline = T_.outline || null;
+  const x = Math.round(f.x + f.ox + f.kx + lx - w / 2), y = f.y - h + oy + bob - Math.round((f.drop || 0) * 340);
+  rect(f.x + f.ox - w / 2 + 6, f.y, w - 12, boss ? 3 : 2, '#1a1a22');
+  let outline = boss && B.boss.phase > 0 ? B.boss.D.crack : T_.outline || null;
   if (f.wind > 0 && Math.floor(B.t * 14) % 2) outline = '#ff5a5a';
   if (f.freeze > 0) outline = '#9fe6f4';
   const alpha = T_.ghost ? .72 + Math.sin(B.t * 6 + f.seed) * .12 : 1;
-  drawSpr(T_.spr, x, y, sc, f.flash > 0 ? 'flash' : '', outline, alpha);
+  drawSpr(f.spr, x, y, sc, f.flash > 0 || (f.inv && Math.floor(B.t * 16) % 2) ? 'flash' : '', outline, alpha);
   const bw = T_.boss ? 46 : 28, by = y - 9;
-  bar(f.x + f.ox - bw / 2, by, bw, 3, f.hp / f.max, '#ff5a5a');
-  bar(f.x + f.ox - bw / 2, by + 4, bw, 1, f.wind > 0 ? 1 : 1 - f.timer / T_.per, f.wind > 0 ? '#ffffff' : '#7a3a3a', '#16161c');
+  if (!boss) bar(f.x + f.ox - bw / 2, by, bw, 3, f.hp / f.max, '#ff5a5a');
+  bar(f.x + f.ox - bw / 2, by + 4, bw, boss ? 2 : 1, f.wind > 0 ? 1 : 1 - f.timer / T_.per, f.wind > 0 ? '#ffffff' : '#7a3a3a', '#16161c');
   if (f.wind > 0) T('!', f.x + f.ox, by - 14, COL.red, 1, 'c', '#000');
   if (f.burnT > 0) rect(f.x + f.ox + bw / 2 + 2, by, 3, 3, '#ff9a3a');
   if (f.chill > 0) rect(f.x + f.ox + bw / 2 + 2, by + 4, 3, 3, '#9fe6f4');
-  if (i === B.target) corners(x - 4, y - 4, w + 8, h + 8, Math.floor(B.t * 4) % 2 ? COL.gold : '#b08a30', 4);
+  if (i === B.target && !boss) corners(x - 4, y - 4, w + 8, h + 8, Math.floor(B.t * 4) % 2 ? COL.gold : '#b08a30', 4);
   hit(x - 6, y - 12, w + 12, h + 16, () => { B.target = i; SFX.click(); });
 }
 function drawFx(e) {
@@ -82,40 +81,95 @@ function drawHud() {
   const A = ACTS[B.act];
   T(A.roman + '-' + (B.li % 3 + 1) + '  ' + LEVELS[B.li].n, 8, 6, A.c);
   T('Wave ' + (B.wave + 1) + '/3', 312, 6, COL.dim, 1, 'r');
-  let bx = 8; [['dmg', '#5a8cff', 'DMG+'], ['spd', '#5fd06a', 'SPD+'], ['heal', '#ff5a50', 'HEAL']].forEach(([k, c, n]) => { if (B.buff[k] > 0) { T(n, bx, 19, c); bx += textW(n) + 6; } });
+  drawBossBar();
+  let bx = 8, byy = B.boss ? 42 : 19; [['dmg', '#5a8cff', 'DMG+'], ['spd', '#5fd06a', 'SPD+'], ['heal', '#ff5a50', 'HEAL']].forEach(([k, c, n]) => { if (B.buff[k] > 0) { T(n, bx, byy, c); bx += textW(n) + 6; } });
   if (B.tip) T(B.tip.txt, 160, 34, COL.dim, 1, 'c');
   if (!save.tut && B.state === 'fight') { if (Math.floor(B.t * 2) % 2 === 0) T(TOUCH ? 'Tap STRIKE when the line is on gold' : 'Press J when the line is on gold', 160, 34, COL.gold, 1, 'c'); }
+  ornDivider(6, 252, 308, '#6a5426');
   // portraits
   B.units.forEach((u, i) => {
-    const x = 8 + i * 38, y = 256, act = u.id === save.active;
-    rect(x, y, 34, 22, '#0c0c10'); frame(x, y, 34, 22, act ? '#ffffff' : '#3a3a44');
+    const x = 8 + i * 38, y = 257, act = u.id === save.active;
+    slotBox(x, y, 34, 22, act ? TINT[u.id] : null);
     drawSpr(u.dead ? 'grave' : u.spr, x + 3, y + 4, 1, u.dead ? 'dim' : '');
     T('' + (i + 1), x + 21, y + 4, act ? COL.white : COL.dim);
-    bar(x + 2, y + 18, 30, 2, u.hp / u.max, u.dead ? '#333' : '#7ee07e');
+    bar(x + 3, y + 18, 28, 2, u.hp / u.max, u.dead ? '#333' : '#7ee07e', '#1a1620');
     hit(x, y, 34, 22, () => switchTo(i));
   });
   const au = activeUnit();
-  if (au) T(charName(au.c), 312, 258, COL.dim, 1, 'r');
-  if (B.label) {
-    const q = B.label.q, txt = q === 'perfect' ? 'PERFECT!' : q === 'good' ? 'Good' : 'Miss', col = q === 'perfect' ? COL.gold : q === 'good' ? COL.green : COL.dim;
-    T(txt, 206, 264 - (B.label.t > .6 ? 2 : 0), col, 1, 'c', '#000');
+  if (au) T(charName(au.c), 312, 259, TINT[au.id], 1, 'r');
+  drawTimingBar(au);
+  if (!TOUCH) T('J strike   1 2 3 swap   Esc menu', 160, 305, '#4a4452', 1, 'c');
+}
+const TINT = { warrior: '#ffd35a', archer: '#7ee07e', mage: '#b48cff' };
+function drawTimingBar(au) {
+  const W = 228, H = 12, Y = 285, ready = B.cd <= 0 && B.state === 'fight', { g, p } = zones();
+  const tint = au ? TINT[au.id] : '#8a8a96', pat = bossPat() || {};
+  const X = 46 + (B.barShake > 0 && !RM ? Math.round(rnd(-2, 2) * B.barShake / .3) : 0);
+  // beveled stone frame with gilded rivets, tinted per character
+  rect(X - 4, Y - 4, W + 8, H + 8, '#000');
+  rect(X - 3, Y - 3, W + 6, 1, '#56506a'); rect(X - 3, Y - 3, 1, H + 6, '#56506a');
+  rect(X - 3, Y + H + 2, W + 6, 1, '#24202c'); rect(X + W + 2, Y - 3, 1, H + 6, '#24202c');
+  rect(X - 2, Y - 2, W + 4, 1, '#3a3444'); rect(X - 2, Y + H + 1, W + 4, 1, '#16131a'); rect(X - 2, Y - 2, 1, H + 4, '#3a3444'); rect(X + W + 1, Y - 2, 1, H + 4, '#16131a');
+  frame(X - 1, Y - 1, W + 2, H + 2, ready ? tint : '#2e2a36');
+  for (const [rx, ry] of [[X - 5, Y - 5], [X + W + 2, Y - 5], [X - 5, Y + H + 2], [X + W + 2, Y + H + 2]]) { rect(rx, ry, 3, 3, '#6a5426'); rect(rx + 1, ry + 1, 1, 1, tint); rect(rx, ry, 1, 1, '#d8b04a'); }
+  // fill, faint tint
+  rect(X, Y, W, H, '#09080c'); ctx.globalAlpha = .08; rect(X, Y, W, H, tint); ctx.globalAlpha = 1;
+  // good zone with dithered edges
+  const gx = X + Math.round((B.zc - g / 2) * W), gw = Math.round(g * W), gc = ready ? '#2f6a3a' : '#1a2a1e', gl = ready ? '#3f8a4a' : '#22362a';
+  rect(gx + 3, Y + 2, gw - 6, H - 4, gc); rect(gx + 3, Y + 2, gw - 6, 1, gl);
+  for (let k = 0; k < 3; k++) for (let yy = Y + 2; yy < Y + H - 2; yy++) {
+    if ((yy + k) % (k === 0 ? 1 : k === 1 ? 2 : 3) === 0) { rect(gx + k, yy, 1, 1, gc); rect(gx + gw - 1 - k, yy, 1, 1, gc); }
   }
-  // timing bar
-  const X = 46, Y = 283, W = 228, H = 12, { g, p } = zones(), ready = B.cd <= 0 && B.state === 'fight';
-  rect(X, Y, W, H, '#0c0c10');
-  const gx = X + Math.round((B.zc - g / 2) * W), gw = Math.round(g * W), px = X + Math.round((B.zc - p / 2) * W), pw = Math.max(2, Math.round(p * W));
-  rect(gx, Y + 2, gw, H - 4, ready ? '#2a5a34' : '#1c2a20');
-  rect(px, Y + 1, pw, H - 2, ready ? COL.gold : '#5a4a20');
-  for (let k = 1; k < 8; k++) rect(X + Math.round(W * k / 8), Y + H - 2, 1, 2, '#2a2a32');
-  frame(X - 1, Y - 1, W + 2, H + 2, B.flash ? (B.flash.q === 'perfect' ? COL.gold : B.flash.q === 'good' ? COL.green : COL.red) : '#3a3a44');
-  if (!ready && B.state === 'fight' && au) bar(X, Y + H + 2, W, 1, 1 - B.cd / au.s.cd, '#5a5a66', '#000');
-  const mx = X + Math.round(B.mk * (W - 2));
-  rect(mx, Y - 4, 2, H + 8, ready ? '#ffffff' : '#6a6a74');
-  rect(mx - 1, Y - 4, 4, 1, ready ? '#ffffff' : '#6a6a74');
-  if (B.flash) { const fx = X + Math.round(B.flash.x * W), k = B.flash.t / .3; for (let i = 0; i < 6; i++) { const a = i * 1.047; rect(fx + Math.cos(a) * (1 - k) * 12, Y + 6 + Math.sin(a) * (1 - k) * 8, 2, 2, B.flash.q === 'perfect' ? COL.gold : '#ffffff'); } }
-  if (!TOUCH) { rect(14, Y - 2, 18, 16, '#16161c'); frame(14, Y - 2, 18, 16, ready ? '#ffffff' : '#3a3a44'); T('J', 23, Y + 1, ready ? COL.white : COL.dim, 1, 'c'); }
+  // perfect zone: pulse + shimmer (blinks in some boss phases)
+  const px = X + Math.round((B.zc - p / 2) * W), pw = Math.max(2, Math.round(p * W));
+  const hidden = pat.blink && Math.floor(B.t * 5) % 3 === 0;
+  if (!hidden) {
+    const pulse = RM ? 0 : (Math.sin(B.t * 8) + 1) / 2;
+    rect(px, Y + 1, pw, H - 2, ready ? (pulse > .6 ? '#ffe27a' : COL.gold) : '#5a4a20');
+    rect(px, Y + 1, pw, 1, ready ? '#fff4b8' : '#6a5a2a'); rect(px, Y + H - 2, pw, 1, ready ? '#c89a2a' : '#4a3a18');
+    if (ready) { for (let yy = Y + 1; yy < Y + H - 1; yy += 2) { rect(px - 1, yy, 1, 1, '#a8842e'); rect(px + pw, yy + 1, 1, 1, '#a8842e'); } }
+    if (ready && !RM) { const sx = px + Math.floor((B.t * 30) % (pw + 6)) - 3; if (sx >= px && sx < px + pw) rect(sx, Y + 2, 1, H - 4, '#ffffff'); }
+  }
+  // tick marks
+  for (let k = 1; k < 16; k++) { const tx = X + Math.round(W * k / 16), maj = k % 4 === 0; rect(tx, Y + H - (maj ? 3 : 2), 1, maj ? 3 : 2, maj ? '#4a4452' : '#2a2632'); rect(tx, Y, 1, maj ? 2 : 1, maj ? '#4a4452' : '#2a2632'); }
+  // hit flash
+  if (B.flash) {
+    const k = B.flash.t / .3, c = B.flash.q === 'perfect' ? '#ffffff' : B.flash.q === 'good' ? '#bfffbf' : '#ff5a5a';
+    ctx.globalAlpha = k * (RM ? .2 : .45); rect(X, Y, W, H, c); ctx.globalAlpha = 1;
+    const fx = X + Math.round(B.flash.x * W), n = B.flash.q === 'perfect' ? 12 : 6;
+    for (let i = 0; i < n; i++) { const a = i * Math.PI * 2 / n + .3, r = (1 - k) * (B.flash.q === 'perfect' ? 18 : 11); rect(fx + Math.round(Math.cos(a) * r), Y + 6 + Math.round(Math.sin(a) * r * .7), 2, 2, B.flash.q === 'perfect' ? (i % 2 ? COL.gold : '#ffffff') : B.flash.q === 'good' ? COL.green : '#ff5a5a'); }
+  }
+  // miss crack
+  if (B.crackFx) {
+    const cx = X + Math.round(B.crackFx.x * W), a = clamp(B.crackFx.t / .4, 0, 1), s = B.crackFx.s;
+    ctx.globalAlpha = a; let x = cx;
+    for (let yy = Y - 2; yy < Y + H + 2; yy++) { rect(x, yy, 1, 1, '#ff5a5a'); rect(x + 1, yy, 1, 1, '#000'); x += ((s >> (yy - Y + 2)) & 1) ? 1 : -1; if (yy === Y + 4) { rect(x - 2, yy + 1, 2, 1, '#ff5a5a'); rect(x - 4, yy + 2, 2, 1, '#ff5a5a'); } }
+    ctx.globalAlpha = 1;
+  }
+  // marker: a small pixel sword with a motion trail
+  if (B.state === 'fight' || B.state === 'intro') { B.trail.push(B.mk); if (B.trail.length > 6) B.trail.shift(); }
+  B.trail.forEach((m, i) => { ctx.globalAlpha = (i + 1) / B.trail.length * .35; rect(X + Math.round(m * (W - 2)), Y + 1, 2, H - 2, ready ? tint : '#4a4a54'); });
+  ctx.globalAlpha = 1;
+  const mx = X + Math.round(B.mk * (W - 2)), mc = ready ? '#ffffff' : '#6a6a74', hc = ready ? tint : '#4a4a54';
+  rect(mx, Y - 7, 2, 2, hc);           // pommel
+  rect(mx, Y - 5, 2, 2, '#8a6a3a');    // grip
+  rect(mx - 2, Y - 3, 6, 1, hc);       // crossguard
+  rect(mx, Y - 2, 2, H + 3, mc);       // blade
+  rect(mx, Y + H + 1, 1, 1, mc);       // tip
+  rect(mx + 1, Y - 2, 1, H + 3, ready ? '#c8c8d4' : '#55555e');
+  if (!ready && B.state === 'fight' && au) bar(X, Y + H + 4, W, 1, 1 - B.cd / au.s.cd, '#5a5a66', '#000');
+  // pop text in the game font
+  if (B.label) {
+    const q = B.label.q, k = 1 - B.label.t / .7, txt = q === 'perfect' ? 'Perfect!' : q === 'good' ? 'Good' : 'Miss';
+    const col = q === 'perfect' ? COL.gold : q === 'good' ? COL.green : '#ff6a6a', sc = q === 'perfect' && k < .5 ? 2 : 1;
+    const lx = clamp(X + Math.round((B.flash ? B.flash.x : B.label.x || .5) * W), 40, 280);
+    if (B.flash) B.label.x = B.flash.x;
+    ctx.globalAlpha = k > .7 ? (1 - k) / .3 : 1;
+    T(txt, lx, Y - 13 - sc * 6 - Math.round(k * 6) + (sc === 2 ? 0 : 6), col, sc, 'c', '#000');
+    ctx.globalAlpha = 1;
+  }
+  if (!TOUCH) { slotBox(14, Y - 2, 18, 16, ready ? tint : null); T('J', 23, Y + 1, ready ? COL.white : COL.dim, 1, 'c'); }
   if (B.streak >= 2) T('x' + B.streak, 306, Y + 1, COL.gold, 1, 'r');
-  if (!TOUCH) T('J strike   1 2 3 swap   Esc menu', 160, 304, '#3e3e48', 1, 'c');
 }
 function drawResult() {
   UI = UI.filter(() => false);
@@ -147,7 +201,7 @@ function drawStrip() {
   if (!TOUCH) return;
   rect(0, AH, LW, STRIP, '#000');
   const y = AH + 6, h = STRIP - 12;
-  if (scene === 'battle' && B && !B.paused && (B.state === 'fight' || B.state === 'intro' || B.state === 'clear')) {
+  if (scene === 'battle' && B && !B.paused && (B.state === 'fight' || B.state === 'intro' || B.state === 'clear' || B.state === 'boss')) {
     const ready = B.cd <= 0 && B.state === 'fight';
     btn(8, y, 196, h, 'STRIKE', strike, { sc: 2, col: ready ? COL.gold : COL.dim, border: ready ? COL.gold : '#3a3a44', fill: ready ? '#16140a' : '#0c0c10' });
     btn(210, y, 50, h, 'Swap', cycleUnit, { dis: B.units.filter(u => !u.dead).length < 2 });
@@ -188,7 +242,7 @@ addEventListener('keydown', e => {
     if (evoPick) evoPick = null; else if (scene === 'gear' || scene === 'skills' || scene === 'party') goto('camp');
   }
 });
-function toLogical(e) { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) * LW / r.width, y: (e.clientY - r.top) * LH / r.height }; }
+function toLogical(e) { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) * VW / r.width - OX, y: (e.clientY - r.top) * VH / r.height - OY }; }
 cv.addEventListener('pointerdown', e => {
   e.preventDefault(); audio(); mouse = toLogical(e);
   for (let i = UI.length - 1; i >= 0; i--) { const b = UI[i]; if (mouse.x >= b.x && mouse.x < b.x + b.w && mouse.y >= b.y && mouse.y < b.y + b.h) { b.fn(); return; } }
@@ -199,7 +253,11 @@ cv.addEventListener('contextmenu', e => e.preventDefault());
 document.addEventListener('visibilitychange', () => { if (document.hidden && B && B.state === 'fight') B.paused = true; persist(); });
 
 let last = performance.now();
-const WAM = window.WAM = { get save() { return save; }, get B() { return B; }, get scene() { return scene; }, startLevel, strike, zones, switchTo, onJ, TUNE, bot: 0, timeScale: 1, goto: s => { scene = s; } };
+function drawVoid() {
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, VW, VH); ctx.fillStyle = '#0e0d12';
+  for (let y = ((OY % 8) + 8) % 8; y < VH; y += 8) for (let x = ((OX % 8) + 8) % 8; x < VW; x += 8) ctx.fillRect(x, y, 1, 1);
+}
+const WAM = window.WAM = { toCss: (x, y) => { const r = cv.getBoundingClientRect(); return { x: r.left + (x + OX) * r.width / VW, y: r.top + (y + OY) * r.height / VH }; }, get save() { return save; }, get B() { return B; }, get scene() { return scene; }, startLevel, strike, zones, switchTo, onJ, TUNE, bot: 0, timeScale: 1, goto: s => { scene = s; } };
 function botTick() {
   // test helper only: WAM.bot = accuracy 0..1 auto-presses J for recordings/tests
   if (!WAM.bot || !B || B.state !== 'fight' || B.paused || B.cd > 0) return;
@@ -215,6 +273,9 @@ function loop(now) {
     if (scene === 'battle' && B) updateBattle(dt);
     UI = [];
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+    drawVoid();
+    const qa = scene === 'battle' && B ? B.quake * (RM ? .25 : 1) : 0;
+    ctx.setTransform(1, 0, 0, 1, OX + (qa ? Math.round(rnd(-qa, qa)) : 0), OY + (qa ? Math.round(rnd(-qa, qa)) : 0));
     if (scene === 'title') drawTitle();
     else if (scene === 'camp') drawCamp();
     else if (scene === 'gear') drawGear();
@@ -223,6 +284,7 @@ function loop(now) {
     else if (scene === 'msg') drawMsg();
     else if (scene === 'battle' && B) drawBattle();
     drawStrip();
+    if (scene === 'battle' && B) drawBossOverlay();
   } catch (err) { console.error(err); }
   requestAnimationFrame(loop);
 }
