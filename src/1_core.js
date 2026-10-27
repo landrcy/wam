@@ -33,7 +33,7 @@ const TUNE = {
   autoCdMul: 1.7,         // allies auto-attack this much slower than their cooldown
   autoDmgMul: 0.6,        // allies' auto attack damage
   foeHp: 40, foeHpGrow: 1.6,
-  soloHp: 0.55, soloDmg: 0.8, soloCls: { warrior: [1, 1], archer: [.9, .72], mage: [.82, .62] }, // [foe hp, foe dmg] per class: squishy heroes get gentler foes // solo hero: one character fights alone, so foes are trimmed to keep the same challenge
+  soloHp: 0.55, soloDmg: 0.8, soloCls: { warrior: [1, 1], archer: [.88, .66], mage: [.8, .55] }, // [foe hp, foe dmg] per class: squishy heroes get gentler foes // solo hero: one character fights alone, so foes are trimmed to keep the same challenge
   foeDmg: 12, foeDmgGrow: 1.5,
   foeRate: 0.64,          // foe attack period multiplier (lower = more often)
   bossHp: 1.8,            // extra boss life
