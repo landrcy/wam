@@ -61,16 +61,16 @@ function drawAdmin() {
     y += 6; aBtn(x0, y, 140, 'Unlock all levels', () => { save.unlocked = 11; save.act4 = true; save.cleared = save.cleared.map(() => true); persist(); admToast('All levels open'); }, { col: COL.green });
   } else if (ADM.tab === 'hero') {
     T(charName(c) + '  Lv ' + c.lvl, x0, y, TINT[c.id]); y += 14;
-    lab('Level', y + 4); [['-5', -5], ['-1', -1], ['+1', 1], ['+5', 5], ['Max', 99]].forEach(([s, d], i) => aBtn(70 + i * 46, y, 42, s, () => { c.lvl = clamp(d === 99 ? 20 : c.lvl + d, 1, 20); c.xp = 0; persist(); }));
+    lab('Level', y + 4); [['-5', -5], ['-1', -1], ['+1', 1], ['+5', 5], ['+10', 99]].forEach(([s, d], i) => aBtn(70 + i * 46, y, 42, s, () => { c.lvl = clamp(d === 99 ? c.lvl + 10 : c.lvl + d, 1, 999); c.xp = 0; persist(); }));
     y += 20; lab('XP', y + 4); bar(70, y + 6, 100, 3, c.xp / xpNeed(c.lvl), COL.blue);
-    aBtn(176, y, 64, '+50%', () => { c.xp += Math.round(xpNeed(c.lvl) * .5); while (c.xp >= xpNeed(c.lvl) && c.lvl < 20) { c.xp -= xpNeed(c.lvl); c.lvl++; } persist(); });
+    aBtn(176, y, 64, '+50%', () => { c.xp += Math.round(xpNeed(c.lvl) * .5); while (c.xp >= xpNeed(c.lvl) && c.lvl < 999) { c.xp -= xpNeed(c.lvl); c.lvl++; } persist(); });
     aBtn(244, y, 60, 'Fill', () => { c.xp = xpNeed(c.lvl) - 1; persist(); });
     y += 20; lab('Scrap ' + save.scrap, y + 4); aBtn(176, y, 64, '+10', () => { save.scrap += 10; persist(); }); aBtn(244, y, 60, '+100', () => { save.scrap += 100; persist(); });
     y += 20; lab('Perfects ' + save.perfects, y + 4); aBtn(176, y, 64, '+10', () => { save.perfects += 10; persist(); }); aBtn(244, y, 60, '+100', () => { save.perfects += 100; persist(); });
     y += 22; lab('Class', y + 4); ['warrior', 'archer', 'mage'].forEach((id, i) => aBtn(70 + i * 78, y, 74, CLS[id].n, () => admSwitchClass(id), { sel: save.cls === id, col: TINT[id] }));
     y += 22; lab('Evolution (any tier)', y); y += 12;
     admEvos(c.id).forEach((ks, t) => { T('T' + (t + 1), x0, y + 4, COL.dark); let xx = 34; ks.forEach(k => { const w = textW(EVO[k].n) + 10; if (xx + w > 308) { xx = 34; y += 17; } aBtn(xx, y, w, EVO[k].n, () => admSetEvo(k), { sel: c.evo === k, col: COL.gold }); xx += w + 4; }); y += 18; });
-    aBtn(x0, y, 120, 'No evolution', () => { c.evo = null; persist(); }); aBtn(138, y, 166, 'Unlock all skills', () => { c.lvl = 20; save.cleared = save.cleared.map(() => true); save.unlocked = 11; save.act4 = true; for (const n of buildTree(c.id).N) if (!c.seen.includes(n.id)) c.seen.push(n.id); persist(); admToast('All nodes lit'); }, { col: COL.green });
+    aBtn(x0, y, 120, 'No evolution', () => { c.evo = null; persist(); }); aBtn(138, y, 166, 'Unlock all skills', () => { c.lvl = Math.max(c.lvl, 15); save.cleared = save.cleared.map(() => true); save.unlocked = 11; save.act4 = true; for (const n of buildTree(c.id).N) if (!c.seen.includes(n.id)) c.seen.push(n.id); persist(); admToast('All nodes lit'); }, { col: COL.green });
   } else if (ADM.tab === 'gear') {
     T('Spawn for ' + CLS[c.id].n + '  (bag ' + save.inv.length + '/' + TUNE.invMax + ')', x0, y, COL.white); y += 16;
     lab('Slot', y + 4); SLOTS.forEach((s, i) => aBtn(52 + (i % 3) * 84, y + Math.floor(i / 3) * 18, 80, s, () => { ADM.slot = i; }, { sel: ADM.slot === i }));

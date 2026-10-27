@@ -42,7 +42,7 @@ const TUNE = {
   dropChance: 0.4,
   forgeCost: 12,
   evoLevel: 5,
-  act4Perfects: 60,       // secret Act IV: clear Act III + this many lifetime PERFECT hits
+  act4Perfects: 60,       // unused: Act IV now opens after Acts I-III are beaten
   invMax: 24,
 };
 
@@ -435,6 +435,7 @@ function noise(d, vol = 0.25, freq = 1200, delay = 0) {
   s.connect(f); f.connect(g); g.connect(master); s.start(t); s.stop(t + d + 0.03);
 }
 const SFX = {
+  ult() { tone(196, .5, 'sawtooth', .18, 200); tone(392, .4, 'square', .14, 300, .1); tone(784, .5, 'square', .12, 400, .25); tone(1175, .6, 'triangle', .14, 0, .4); noise(.6, .3, 1200, .05); },
   perfect() { tone(988, .06, 'square', .2); tone(1480, .14, 'square', .16, 0, .045); noise(.09, .3, 3500); },
   good() { tone(587, .07, 'square', .18); noise(.07, .25, 1800); },
   miss() { tone(160, .14, 'triangle', .3, -70); },

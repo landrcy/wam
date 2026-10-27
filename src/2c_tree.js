@@ -55,5 +55,7 @@ function nodeState(c, n) {
   return reqMet(c, n.q) ? 'own' : 'open';
 }
 // skill ranks come from lit nodes
-function treeSk(c) { const T = buildTree(c.id), o = {}; for (const n of T.N) if (n.sk && nodeState(c, n) === 'own') o[n.sk] = (o[n.sk] || 0) + n.rank; return o; }
+const PARAGON_LV = 15; // past this level every level adds a rank to a core talent, so growth never stops
+function treeSk(c) { const T = buildTree(c.id), o = {}; for (const n of T.N) if (n.sk && nodeState(c, n) === 'own') o[n.sk] = (o[n.sk] || 0) + n.rank;
+  const K = SKILLS[c.id].map(s => s.k); for (let i = 0; i < Math.max(0, c.lvl - PARAGON_LV); i++) { const k = K[i % 6]; o[k] = (o[k] || 0) + (i % 6 < 3 ? 1 : .5); } return o; }
 function newlyLit(c) { const T = buildTree(c.id); c.seen = c.seen || []; return T.N.filter(n => n.k !== 'root' && nodeState(c, n) === 'own' && !c.seen.includes(n.id)); }

@@ -228,8 +228,9 @@ function addChar(id) {
   const c = newChar(id, lvl); save.chars[id] = c; save.party.push(id);
   const w = makeItem(Math.max(1, save.bestLvl - 1), 'weapon', id); w.rar = 1; c.gear.weapon = w;
 }
-function act4Ready() { return save.cleared[8] && save.perfects >= TUNE.act4Perfects; }
-function levelOpen(li) { return li <= save.unlocked && (li < 9 || save.act4); }
+const actsBeaten = () => [2, 5, 8].filter(li => save.cleared[li]).length;
+function act4Ready() { return actsBeaten() >= 3; } // the secret act opens once Acts I, II and III are each beaten
+function levelOpen(li) { return li < 9 || save.act4; } // every level of Acts I-III is open from the start
 
 // ================= stats =================
 function calcStats(c) {

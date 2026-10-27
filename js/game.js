@@ -42,7 +42,7 @@ const TUNE = {
   dropChance: 0.4,
   forgeCost: 12,
   evoLevel: 5,
-  act4Perfects: 60,       // secret Act IV: clear Act III + this many lifetime PERFECT hits
+  act4Perfects: 60,       // unused: Act IV now opens after Acts I-III are beaten
   invMax: 24,
 };
 
@@ -435,6 +435,7 @@ function noise(d, vol = 0.25, freq = 1200, delay = 0) {
   s.connect(f); f.connect(g); g.connect(master); s.start(t); s.stop(t + d + 0.03);
 }
 const SFX = {
+  ult() { tone(196, .5, 'sawtooth', .18, 200); tone(392, .4, 'square', .14, 300, .1); tone(784, .5, 'square', .12, 400, .25); tone(1175, .6, 'triangle', .14, 0, .4); noise(.6, .3, 1200, .05); },
   perfect() { tone(988, .06, 'square', .2); tone(1480, .14, 'square', .16, 0, .045); noise(.09, .3, 3500); },
   good() { tone(587, .07, 'square', .18); noise(.07, .25, 1800); },
   miss() { tone(160, .14, 'triangle', .3, -70); },
@@ -691,8 +692,9 @@ function addChar(id) {
   const c = newChar(id, lvl); save.chars[id] = c; save.party.push(id);
   const w = makeItem(Math.max(1, save.bestLvl - 1), 'weapon', id); w.rar = 1; c.gear.weapon = w;
 }
-function act4Ready() { return save.cleared[8] && save.perfects >= TUNE.act4Perfects; }
-function levelOpen(li) { return li <= save.unlocked && (li < 9 || save.act4); }
+const actsBeaten = () => [2, 5, 8].filter(li => save.cleared[li]).length;
+function act4Ready() { return actsBeaten() >= 3; } // the secret act opens once Acts I, II and III are each beaten
+function levelOpen(li) { return li < 9 || save.act4; } // every level of Acts I-III is open from the start
 
 // ================= stats =================
 function calcStats(c) {
@@ -1303,7 +1305,9 @@ function nodeState(c, n) {
   return reqMet(c, n.q) ? 'own' : 'open';
 }
 // skill ranks come from lit nodes
-function treeSk(c) { const T = buildTree(c.id), o = {}; for (const n of T.N) if (n.sk && nodeState(c, n) === 'own') o[n.sk] = (o[n.sk] || 0) + n.rank; return o; }
+const PARAGON_LV = 15; // past this level every level adds a rank to a core talent, so growth never stops
+function treeSk(c) { const T = buildTree(c.id), o = {}; for (const n of T.N) if (n.sk && nodeState(c, n) === 'own') o[n.sk] = (o[n.sk] || 0) + n.rank;
+  const K = SKILLS[c.id].map(s => s.k); for (let i = 0; i < Math.max(0, c.lvl - PARAGON_LV); i++) { const k = K[i % 6]; o[k] = (o[k] || 0) + (i % 6 < 3 ? 1 : .5); } return o; }
 function newlyLit(c) { const T = buildTree(c.id); c.seen = c.seen || []; return T.N.filter(n => n.k !== 'root' && nodeState(c, n) === 'own' && !c.seen.includes(n.id)); }
 // ---- Act backdrops: animated pixel-art scene filling the screen around the 320px box ----
 // Drawn in raw canvas pixels (1 canvas px = 1 logical px). Static layers are cached per act/size;
@@ -1578,7 +1582,7 @@ function strike() {
     q = B.runeQ.every(x => x === 'perfect') ? 'perfect' : 'good';
   }
   if (bv === 'guard' && q === 'miss' && Math.abs(B.mk - B.zw) <= g * .3) { q = 'good'; ward = true; }
-  B.cd = u.s.cd * (B.buff.spd > 0 ? .67 : 1);
+  B.cd = u.s.cd * (B.buff.spd > 0 ? .67 : 1) * ultCdMul();
   B.flash = { q, t: .3, x: B.mk };
   if (q === 'perfect') { save.perfects++; B.streak++; B.perf++; save.bestStreak = Math.max(save.bestStreak, B.streak); }
   else if (q === 'miss') B.streak = 0;
@@ -1608,6 +1612,7 @@ function attack(u, q, manual) {
   if (grp === 'm') { u.dash = { t: 0, dur: mv === 'blink' ? .18 : manual ? .26 : .22, tx: fx0 - 34 - u.x, ty: f.y - u.y, blink: mv === 'blink' }; dust(u.x, u.y, 5); }
   else if (grp === 'r') u.kb = manual ? (mv === 'snipe' ? 8 : 5) : 3; else u.cast = .25;
   if (B.buff.dmg > 0) dmg *= 1.25;
+  dmg *= ultDmgMul();
   if (manual && unitBar(u) === 'rage') dmg *= 1 + Math.min(.3, B.combo * .02);
   if (u.s.rage) dmg *= 1 + Math.min(.4, (1 - u.hp / u.max) * .6);
   if (u.s.surge && manual && B.streak >= 5) dmg *= 1 + u.s.surge;
@@ -1676,6 +1681,7 @@ function evoAfterHit(u, f, dmg, q, manual) {
   if (s.rally) { B.buff.dmg = Math.max(B.buff.dmg, s.rally); num(u.x, u.y - 72, 'RALLY', COL.gold); }
   if (s.echo) setTimeout(() => { if (B && !f.dead) { num(cx, cy - 30, 'echo', '#e8ffff'); hitFoe(f, dmg * s.echo, { q: 'good' }, u); } }, 180);
   if (s.nova) { B.novaC[u.id] = (B.novaC[u.id] || 0) + 1; if (B.novaC[u.id] >= s.nova) { B.novaC[u.id] = 0; nova(u, s.novaM, s.holy ? '#fff0a0' : s.burn ? '#ff7a1a' : '#d6a6ff', 'NOVA'); } }
+  if (manual) ultOnHit(u, f, dmg);
   if (s.shieldAll) { B.shC[u.id] = (B.shC[u.id] || 0) + 1; if (B.shC[u.id] >= s.shieldAll) { B.shC[u.id] = 0; B.units.forEach(o => { if (!o.dead) o.guard = 1; }); num(u.x, u.y - 72, 'SHIELD', COL.blue); } }
 }
 function hitFoe(f, dmg, info, u) {
@@ -1683,7 +1689,9 @@ function hitFoe(f, dmg, info, u) {
   if (f.inv) { const [cx, cy] = foeCenter(f); spark(cx, cy, '#ffffff', 60); return; }
   if (f.T.ghost && info.q === 'good') dmg *= .5;
   if (f.T.plated && info.q === 'good') dmg *= .6;
+  if (u && B.units.includes(u)) { dmg = ultPreHit(u, f, dmg, info); }
   dmg = Math.max(1, Math.round(dmg));
+  if (u && B.units.includes(u) && info.q !== 'splash') ultFill(u, dmg);
   if (ADM.ohk) dmg = Math.max(dmg, f.hp); f.hp -= dmg; const isB = B.boss && B.boss.f === f; f.flash = isB ? (info.manual ? .06 : Math.max(f.flash, 0)) : .09;
   const str = clamp(dmg / f.max * (isB ? 12 : 3), 0, 1); f.kx = Math.round((info.q === 'splash' ? 2 : 4) + str * (isB ? 6 : 16) + (info.q === 'perfect' ? 4 : 0));
   if (info.manual) B.shake = Math.max(B.shake, 1.5 + str * 6 + (info.crit ? 2 : 0));
@@ -1714,7 +1722,8 @@ function killFoe(f) {
   });
   const lastOne = B.wave === 2 && !liveFoes().length && !B.foes.some(o => o.reviveT > 0);
   if (f.T.boss || lastOne || Math.random() < TUNE.dropChance) {
-    const it = makeItem(f.L + (Math.random() < .3 ? 1 : 0), null, pick(save.party), f.T.boss ? 1 : 0, f.T.boss ? .6 : .1 * B.act);
+    const hl = (save.chars[save.cls] || {}).lvl || 1, il = Math.max(f.L, hl - 2 + Math.floor(Math.random() * 3)); // farming: drops keep pace with the hero's level
+    const it = makeItem(il + (Math.random() < .3 ? 1 : 0), null, pick(save.party), f.T.boss ? 1 : 0, f.T.boss ? .6 : .1 * B.act);
     const [dx0, dy0] = foeCenter(f);
     if (autoEquipDrop(it)) { it.equipped = true; setTimeout(() => { if (B) { num(dx0, dy0 - 30, 'equipped!', COL.gold); B.fx.push({ type: 'ring', x: B.units[0].x, y: B.units[0].y - 24, t: 0, dur: .45, col: COL.gold }); } }, 700); }
     else if (save.autoScrap && isWorse(it)) { it.scrapped = true; save.scrap += it.rar + 1; setTimeout(() => B && num(dx0, dy0 - 30, 'scrapped +' + (it.rar + 1), COL.dim), 500); }
@@ -1757,7 +1766,7 @@ function foeHit(f) {
     let d = f.dmg * rnd(.9, 1.1) * (P.slam ? .7 : 1) * 30 / (30 + u.s.arm);
     if (P.dodge) { d *= .4; u.hop = .32; num(u.x - 10, u.y - 64, 'dodge', COL.green); }
     if (u.guard) { d *= .5; u.guard = 0; num(u.x, u.y - 64, 'guard', COL.blue); }
-    d = Math.max(1, Math.round(d)); if (ADM.god) d = 0; u.hp -= d;
+    d = Math.max(1, Math.round(d)); d = Math.round(ultTaken(d, u)); if (ADM.god) d = 0; u.hp -= d;
     if (u.s.thorns && !f.dead) hitFoe(f, d * u.s.thorns * 2, { q: 'splash' }, u); u.hurt = .22; u.kb = Math.max(u.kb, P.dodge ? 2 : 7);
     num(u.x + rnd(-5, 5), u.y - 54, '-' + d, COL.red, d > u.max * .2 ? 2 : 1);
     for (let i = 0; i < 8; i++) spark(u.x, u.y - 24, i % 2 ? '#ff5a5a' : '#ffffff', 100);
@@ -1806,7 +1815,7 @@ function winLevel() {
     save.goblets.push('red');
     msgs.push({ title: 'Act III cleared', char: save.chars[save.cls], col: COL.gold, lines: ['The Black Keep falls silent.', 'Found the Red Goblet.', '', 'But something stirs beyond the keep...', 'The void hungers for perfection.'] });
   }
-  if (act4Ready() && !save.act4) { save.act4 = true; msgs.push({ title: 'A void opens', spr: 'shade', col: '#b480ff', lines: ['Your ' + TUNE.act4Perfects + ' perfect strikes tore the sky.', 'Secret Act IV: The Void is open.'] }); }
+  if (act4Ready() && !save.act4) { save.act4 = true; msgs.push({ title: '...', spr: 'shade', col: '#b480ff', crack: 1, lines: ['But something stirs beyond the glass...', 'An extra challenge awaits.'] }); }
   if (first && li === 11) msgs.push({ title: 'The reflection breaks', spr: 'mirror', col: '#ffffff', lines: ['You beat the secret act.', 'Thanks for testing W.A.M.!'] });
   B.msgs = msgs;
   if (save.unlocked > li && levelOpen(li + 1)) save.sel = li + 1;
@@ -1820,7 +1829,7 @@ function leaveBattle() {
 }
 
 function updateBattle(dt) {
-  B.t += dt;
+  B.t += dt; updateUlt(dt);
   if (B.banner) { B.banner.t += dt; if (B.banner.t > B.banner.dur) B.banner = null; }
   if (B.tip) { B.tip.t -= dt; if (B.tip.t <= 0) B.tip = null; }
   if (B.hitstop > 0) { B.hitstop -= dt; return; }
@@ -2564,6 +2573,101 @@ function drawBossOverlay() {
   }
   if (bo.flash) { const k = bo.flash.t / bo.flash.dur; ctx.globalAlpha = (1 - k) * (RM ? .2 : .75); ctx.fillStyle = bo.flash.col; ctx.fillRect(0, 0, VW, VH); ctx.globalAlpha = 1; }
 }
+// ---- Ultimate Forms: level 15+ heroes with a tier-3 evolution charge a meter by dealing damage, then transform (K / ULT button) ----
+const ULT_LV = 15, ULT_DUR = 7, ULT_FILL = 30; // meter = 30 base hits of damage
+// fx: special power while transformed; deco: how the form looks
+const ULT = {
+  crusader: { n: 'Holy Avatar', c: '#ffe070', c2: '#fff8d8', fx: 'radiance', deco: 'wings' },
+  bastion: { n: 'Living Fortress', c: '#a6caff', c2: '#e8f0ff', fx: 'aegis', deco: 'bulwark' },
+  sunknight: { n: 'Solar Champion', c: '#ffb040', c2: '#fff0a0', fx: 'radiance', deco: 'sun' },
+  seraph: { n: 'Archon', c: '#fff4d0', c2: '#ffffff', fx: 'rebirth', deco: 'wings' },
+  conqueror: { n: 'Warlord Ascendant', c: '#ff9a3a', c2: '#ffe0a0', fx: 'execute', deco: 'crown' },
+  warmaster: { n: 'Cyclone King', c: '#e8e8f0', c2: '#ffffff', fx: 'whirl', deco: 'storm' },
+  bloodlord: { n: 'Crimson Tyrant', c: '#d02a3a', c2: '#ff8a8a', fx: 'leech', deco: 'horns' },
+  reaper: { n: 'Death Incarnate', c: '#8a7aa8', c2: '#e0d8ff', fx: 'execute', deco: 'scythe' },
+  wildlord: { n: 'Spirit of the Wild', c: '#7ee07e', c2: '#d8ffd0', fx: 'pack', deco: 'antlers' },
+  packleader: { n: 'Alpha Howl', c: '#c8a060', c2: '#fff0c0', fx: 'pack', deco: 'spirits' },
+  tempest: { n: 'Storm Eye', c: '#6ac8ff', c2: '#e0f8ff', fx: 'storm', deco: 'storm' },
+  skyhunter: { n: 'Sky Sovereign', c: '#8ad8ff', c2: '#ffffff', fx: 'pierce', deco: 'wings' },
+  nightstalker: { n: 'Living Shadow', c: '#5a3a8a', c2: '#c8a8ff', fx: 'execute', deco: 'shadow' },
+  phantom: { n: 'Phantom Legion', c: '#a8b8d8', c2: '#ffffff', fx: 'echo', deco: 'spirits' },
+  marksman: { n: 'Godshot', c: '#ffd35a', c2: '#ffffff', fx: 'pierce', deco: 'sight' },
+  hawkeye: { n: 'Hawk Spirit', c: '#e0b070', c2: '#fff4d0', fx: 'crit', deco: 'wings' },
+  hellcaller: { n: 'Hell Gate', c: '#ff4a1a', c2: '#ffb040', fx: 'radiance', deco: 'horns' },
+  cinderlord: { n: 'Living Inferno', c: '#ff7a1a', c2: '#ffe070', fx: 'radiance', deco: 'flames' },
+  sunflare: { n: 'Dawnbringer', c: '#ffd040', c2: '#ffffff', fx: 'radiance', deco: 'sun' },
+  ashborn: { n: 'Phoenix Rebirth', c: '#ff8a2a', c2: '#ffe070', fx: 'rebirth', deco: 'wings' },
+  glacier: { n: 'Winter Throne', c: '#a8e8ff', c2: '#ffffff', fx: 'freeze', deco: 'frost' },
+  blizzard: { n: 'White Storm', c: '#c8f0ff', c2: '#ffffff', fx: 'storm', deco: 'frost' },
+  timeweaver: { n: 'Time Lord', c: '#e8d8a0', c2: '#ffffff', fx: 'echo', deco: 'clock' },
+  voidwalker: { n: 'Void Avatar', c: '#8a4ad8', c2: '#e0c0ff', fx: 'crit', deco: 'void' },
+};
+const ULT_FX = { radiance: 'every hit bursts on all foes', aegis: 'immune, reflects all harm', rebirth: 'heals fast, half damage taken', execute: 'executes foes under 35%, +50% vs bosses', whirl: 'every hit strikes all foes', leech: 'heals 25% of damage', pack: 'spirit beasts join every hit', storm: 'lightning chains to all foes', pierce: 'shots pierce every foe', crit: 'every hit crits', echo: 'every hit echoes in full', freeze: 'foes are frozen in time' };
+function ultOf(u) { const c = u && u.c; if (!c || c.lvl < ULT_LV || !c.evo || !EVO[c.evo] || EVO[c.evo].tier !== 3) return null; return ULT[c.evo] || null; }
+function ultSt() { if (!B.ult) B.ult = { m: 0, on: 0, t: 0, tr: 0 }; return B.ult; }
+const ultOn = () => !!(B && B.ult && B.ult.on);
+function ultFill(u, dmg) { const U = ultOf(u); if (!U) return; const st = ultSt(); if (st.on) return; const was = st.m; st.m = Math.min(1, st.m + dmg / (u.s.dmg * ULT_FILL)); if (was < 1 && st.m >= 1) { num(u.x, u.y - 78, 'ULTIMATE READY', U.c); SFX.orb(); } }
+function ultGo() {
+  if (!B || B.state !== 'fight' || B.paused) return; const u = activeUnit(), U = ultOf(u); if (!U) return; const st = ultSt();
+  if (ADM.ult) st.m = 1; if (st.on || st.m < 1) return;
+  st.on = 1; st.t = ULT_DUR; st.tr = .9; st.m = 0; st.k = u.c.evo;
+  B.hitstop = Math.max(B.hitstop || 0, .12); if (!RM) { B.quake = 6; B.impact = .3; }
+  for (let i = 0; i < 3; i++) B.fx.push({ type: 'ring', x: u.x, y: u.y - 24, t: -i * .12, dur: .6, col: i % 2 ? U.c2 : U.c });
+  for (let i = 0; i < 30; i++) spark(u.x, u.y - 24, i % 2 ? U.c : U.c2, 160);
+  banner(U.n + '!', U.c, 1.4); u.hp = Math.min(u.max, u.hp + u.max * .15); SFX.ult();
+  if (U.fx === 'freeze') B.slowT = Math.max(B.slowT, ULT_DUR);
+}
+function updateUlt(dt) {
+  if (!B || !B.ult) return; const st = B.ult; if (st.tr > 0) st.tr -= dt; if (ADM.ult && !st.on) st.m = 1;
+  if (!st.on) return; st.t -= dt; const u = activeUnit(); const U = ULT[st.k];
+  if (U && u && U.fx === 'rebirth') u.hp = Math.min(u.max, u.hp + u.max * .05 * dt);
+  if (U && U.fx === 'freeze') B.slowT = Math.max(B.slowT, .2);
+  if (!RM && u && U && Math.random() < dt * 30) B.parts.push({ x: u.x + rnd(-16, 16), y: u.y - rnd(0, 44), vx: rnd(-10, 10), vy: -rnd(30, 70), t: 0, life: rnd(.3, .7), col: Math.random() < .5 ? U.c : U.c2, s: 1, g: -20 });
+  if (st.t <= 0 || !u) { st.on = 0; if (u) num(u.x, u.y - 70, 'form fades', COL.dim); }
+}
+const ultDmgMul = () => ultOn() ? 1.6 : 1, ultCdMul = () => ultOn() ? .65 : 1;
+function ultTaken(d, u) { if (!ultOn()) return d; const U = ULT[B.ult.k]; if (U.fx === 'aegis') { const f = liveFoes()[0]; if (f && d > 0) hitFoe(f, d * 2, { q: 'good' }, u); return 0; } return d * .5; }
+function ultPreHit(u, f, dmg, info) { // multipliers that depend on the target
+  if (!ultOn()) return dmg; const U = ULT[B.ult.k], isB = B.boss && B.boss.f === f;
+  if (U.fx === 'crit' && !info.crit) dmg *= u.s.critDmg; if (U.fx === 'execute' && isB) dmg *= 1.5; return dmg;
+}
+function ultOnHit(u, f, dmg) { // extra effects after a hero hit while transformed
+  if (!ultOn()) return; const U = ULT[B.ult.k], others = liveFoes().filter(o => o !== f), [cx, cy] = foeCenter(f);
+  const all = (m, lab, col) => { for (const o of others) { const [ox, oy] = foeCenter(o); B.fx.push({ type: 'ring', x: ox, y: oy, t: 0, dur: .25, col }); hitFoe(o, dmg * m, { q: 'splash' }, u); } if (others.length && lab) num(cx, cy - 34, lab, col); };
+  if (U.fx === 'radiance') all(.45, 'RADIANCE', U.c); else if (U.fx === 'whirl') all(.6, 'CYCLONE', U.c); else if (U.fx === 'storm') all(.5, 'STORM', U.c); else if (U.fx === 'pierce') all(.7, 'PIERCE', U.c);
+  else if (U.fx === 'leech') { u.hp = Math.min(u.max, u.hp + dmg * .25); } else if (U.fx === 'echo') { setTimeout(() => { if (B && !f.dead && ultOn()) { num(cx, cy - 30, 'echo', U.c2); hitFoe(f, dmg, { q: 'good' }, u); } }, 160); }
+  else if (U.fx === 'pack') { const t = pick(liveFoes()); if (t) { const [tx, ty] = foeCenter(t); B.fx.push({ type: 'ring', x: tx, y: ty, t: 0, dur: .3, col: U.c }); hitFoe(t, dmg * .6, { q: 'good' }, u); } }
+  else if (U.fx === 'execute' && !f.dead && f.hp / f.max < .35 && !(B.boss && B.boss.f === f)) { num(cx, cy - 26, 'EXECUTE', U.c); hitFoe(f, f.hp + 1, { q: 'perfect' }, u); }
+}
+// ---- drawing: aura behind, form details in front ----
+function drawUltBack(u, x, y) {
+  const st = B.ult; if (!st || !st.on || u.id !== save.active) return; const U = ULT[st.k], t = RM ? 0 : B.t, k = Math.min(1, (ULT_DUR - st.t) / .3) * Math.min(1, st.t / .5);
+  ctx.globalAlpha = .35 * k; for (let i = 0; i < 14; i++) { const h = 10 + Math.round((Math.sin(t * 7 + i * 1.7) + 1) * 6) + (i > 3 && i < 10 ? 10 : 0); rect(x + 2 + i * 3.4 | 0, y + 46 - h, 3, h, i % 2 ? U.c : U.c2); } ctx.globalAlpha = 1;
+  const D = U.deco, cx = x + 24, wf = RM ? 0 : Math.round(Math.sin(t * 6) * 2);
+  if (D === 'wings') for (const s of [-1, 1]) for (let j = 0; j < 6; j++) { const len = 18 - j * 2; for (let q = 0; q < len; q++) rect(cx + s * (8 + q) - (s < 0 ? 1 : 0), y + 14 + j * 3 - Math.round(q * .5) + (q > len - 4 ? wf : 0), 1, 2, j % 2 ? U.c2 : U.c); }
+  if (D === 'sun' || D === 'clock') { ctx.globalAlpha = .7; ringPx(cx, y + 16, 22, U.c); ringPx(cx, y + 16, 20, U.c2, 3); for (let i = 0; i < 12; i++) { const a = i / 12 * Math.PI * 2 + (D === 'clock' ? t * .8 : t * .3); rect(Math.round(cx + Math.cos(a) * 25), Math.round(y + 16 + Math.sin(a) * 25), 2, 2, U.c); } ctx.globalAlpha = 1; }
+  if (D === 'shadow' || D === 'void') { ctx.globalAlpha = .5; for (let i = 0; i < 3; i++) drawChar(u.c, x - 6 - i * 6 + (RM ? 0 : Math.round(Math.sin(t * 3 + i) * 2)), y, PSC, 'flash'); ctx.globalAlpha = 1; }
+}
+function drawUltFront(u, x, y) {
+  const st = B.ult; if (!st || u.id !== save.active) return; const U = st.k && ULT[st.k]; if (!U) return; const t = RM ? 0 : B.t, cx = x + 24;
+  if (st.tr > 0) { const k = st.tr / .9; ctx.globalAlpha = k * .8; rect(x - 4, y - 4, 56, 56, '#ffffff'); ctx.globalAlpha = 1; for (let i = 0; i < 16; i++) { const a = i / 16 * Math.PI * 2, r = (1 - k) * 40; rect(Math.round(cx + Math.cos(a) * r), Math.round(y + 24 + Math.sin(a) * r * .7), 2, 2, i % 2 ? U.c : U.c2); } }
+  if (!st.on) return; const D = U.deco;
+  if (D === 'wings' || D === 'crown' || D === 'sun') { const hy = y - 6 + (RM ? 0 : Math.round(Math.sin(t * 3))); if (D === 'crown') { rect(cx - 7, hy + 2, 14, 3, U.c); for (let i = 0; i < 4; i++) rect(cx - 7 + i * 4, hy - 1, 2, 3, U.c); rect(cx - 1, hy + 3, 2, 1, '#ff3a5a'); } else { for (let i = -6; i <= 6; i++) rect(cx + i, hy - (Math.abs(i) > 4 ? 0 : 1), 1, 1, U.c2); rect(cx - 7, hy, 1, 1, U.c); rect(cx + 7, hy, 1, 1, U.c); } }
+  if (D === 'horns' || D === 'antlers') for (const s of [-1, 1]) for (let q = 0; q < 7; q++) { rect(cx + s * (6 + q) - (s < 0 ? 1 : 0), y + 2 - q - (q > 3 ? q - 3 : 0), 2, 2, q % 2 ? U.c2 : U.c); if (D === 'antlers' && q === 4) rect(cx + s * (8 + q), y - 6 - q, 1, 3, U.c); }
+  if (D === 'frost' || D === 'void' || D === 'storm' || D === 'spirits' || D === 'flames' || D === 'clock') { const n = D === 'storm' ? 5 : 4; for (let i = 0; i < n; i++) { const a = t * (D === 'storm' ? 4 : 2) + i / n * Math.PI * 2, ox = Math.round(cx + Math.cos(a) * 26), oy = Math.round(y + 24 + Math.sin(a) * 12);
+    if (D === 'frost') { rect(ox - 1, oy - 3, 2, 7, U.c2); rect(ox - 3, oy, 6, 1, U.c); } else if (D === 'void') { rect(ox - 2, oy - 2, 5, 5, '#1a0a2a'); rect(ox - 1, oy - 1, 3, 3, U.c); rect(ox, oy, 1, 1, U.c2); } else if (D === 'storm') { rect(ox, oy - 3, 1, 3, U.c2); rect(ox + 1, oy, 1, 3, U.c); } else if (D === 'flames') { rect(ox - 1, oy - 2, 3, 4, U.c); rect(ox, oy - 4, 1, 3, U.c2); } else if (D === 'clock') { rect(ox - 1, oy - 1, 3, 3, U.c); } else { ctx.globalAlpha = .6; rect(ox - 3, oy - 2, 7, 4, U.c2); rect(ox + 3, oy - 4, 2, 3, U.c2); ctx.globalAlpha = 1; } } }
+  if (D === 'bulwark') { ctx.globalAlpha = .55 + (RM ? 0 : .2 * Math.sin(t * 5)); frame(x - 6, y - 6, 60, 60, U.c); corners(x - 8, y - 8, 64, 64, U.c2, 6); ctx.globalAlpha = 1; }
+  if (D === 'scythe') { const sx = x + 46, sy = y - 4; for (let q = 0; q < 40; q++) rect(sx - (q >> 3), sy + q, 1, 1, '#5a4a3a'); for (let q = 0; q < 16; q++) rect(sx - q, sy + Math.round(q * q / 40), 2, 1, U.c2); }
+  if (D === 'sight') { ctx.globalAlpha = .7; ringPx(cx + 30, y + 12, 5, U.c); rect(cx + 30, y + 4, 1, 4, U.c); rect(cx + 30, y + 17, 1, 4, U.c); ctx.globalAlpha = 1; }
+}
+// HUD meter: top-left under the level name; click to transform
+function drawUltHud() {
+  const u = activeUnit(), U = ultOf(u); if (!U) return; const st = ultSt(), full = st.m >= 1 || ADM.ult;
+  const x = 8, y = 18, w = 82; rect(x, y, w, 11, '#0c0c10'); frame(x, y, w, 11, full ? U.c : '#3a3a44');
+  const fw = st.on ? Math.round((w - 4) * st.t / ULT_DUR) : Math.round((w - 4) * st.m); rect(x + 2, y + 2, fw, 7, st.on ? U.c2 : U.c); if (full && !st.on && !RM && Math.floor(B.t * 4) % 2) rect(x + 2, y + 2, w - 4, 1, '#ffffff');
+  T(st.on ? U.n.split(' ')[0] : full ? (TOUCH ? 'ULT ready' : 'K  ULT ready') : 'ultimate', x + w / 2, y + 2, full || st.on ? '#000' : COL.dim, 1, 'c');
+  hit(x, y, w, 11, ultGo);
+}
 let treeZY = 196;
 // ================= UI / scenes =================
 let scene = 'title', UI = [], mouse = { x: -1, y: -1 }, msgQueue = [], tab = 'warrior', selItem = null, selSkill = null, evoPick = null, confirmNew = 0, gtime = 0;
@@ -2732,17 +2836,19 @@ function bigTitle(inCy, inS) {
       for (let j = 0; j < L.H; j++) for (let i = 0; i < 2; i++) { const px = gx + i - j / 2 | 0; if (L.mask(px, j)) { ctx.fillStyle = '#ffffff'; ctx.fillRect(x + px, y + j, 1, 1); } } ctx.globalAlpha = 1; } }
 }
 function drawCamp() {
-  if (act4Ready() && !save.act4) { save.act4 = true; persist(); msgQueue.push({ title: 'A void opens', spr: 'shade', col: '#b480ff', lines: ['Your ' + TUNE.act4Perfects + ' perfect strikes tore the sky.', 'Secret Act IV: The Void is open.'] }); scene = 'msg'; return; }
+  if (act4Ready() && !save.act4) { save.act4 = true; persist(); msgQueue.push({ title: '...', spr: 'shade', col: '#b480ff', crack: 1, lines: ['But something stirs beyond the glass...', 'An extra challenge awaits.'] }); scene = 'msg'; return; }
   const sa = Math.floor(save.sel / 3);
   drawArena(ACTS[sa].c);
   bigTitle();
   T('Perfect ' + save.perfects, 8, 10, COL.gold);
   btn(240, 6, 72, 16, save.mute ? 'Sound off' : 'Sound on', () => { save.mute = !save.mute; persist(); SFX.click(); }, { col: COL.dim });
-  const showAct4 = save.cleared[8] || save.act4;
+  const showAct4 = true; // the secret act's row always shows how many acts are beaten
+  T('All levels open: pick any', 8, 25, COL.dim);
   for (let a = 0; a < (showAct4 ? 4 : 3); a++) {
     const y = 38 + a * 25, A = ACTS[a], open = a < 3 || save.act4;
     T(A.roman, 10, y + 5, open ? A.c : COL.dark);
     T(a === 3 && !save.act4 ? '? ? ?' : A.n, 34, y + 5, levelOpen(a * 3) ? COL.white : COL.dark);
+    if (a === 3 && save.act4) T('extra challenge', 34, y + 16, '#b480ff');
     for (let l = 0; l < 3; l++) {
       const li = a * 3 + l, x = 166 + l * 48, op = levelOpen(li), sel = save.sel === li;
       btn(x, y, 42, 20, op ? (a + 1) + '-' + (l + 1) : '', op ? () => { save.sel = li; SFX.click(); } : null,
@@ -2750,7 +2856,7 @@ function drawCamp() {
       if (!op) { rect(x + 18, y + 8, 6, 5, '#2a2a32'); frame(x + 19, y + 5, 4, 4, '#2a2a32'); }
       if (save.cleared[li]) rect(x + 36, y + 3, 3, 3, COL.green);
     }
-    if (a === 3 && !save.act4) T('perfect hits ' + Math.min(save.perfects, TUNE.act4Perfects) + '/' + TUNE.act4Perfects, 34, y + 16, '#5a4a7a');
+    if (a === 3 && !save.act4) T('beat Acts I-III  ' + actsBeaten() + '/3', 34, y + 16, '#5a4a7a');
   }
   // selected level
   const L = LEVELS[save.sel], py = 40 + (showAct4 ? 4 : 3) * 25;
@@ -3032,6 +3138,8 @@ function drawMsg() {
   rect(160 - w / 2 + 8, 76 + h, w - 16, 3, '#16161c');
   drawSpr(m.spr, 160 - w / 2, 76 - (Math.floor(gtime * 2) % 2), 5, '', FOES[m.spr] && FOES[m.spr].outline || null); }
   for (let i = 0; i < 6; i++) { const a = gtime * 1.5 + i * 1.047, r = 52 + Math.sin(gtime * 3 + i) * 4; rect(160 + Math.cos(a) * r, 108 + Math.sin(a) * r * .6, 2, 2, i % 2 ? m.col : '#ffffff'); }
+  if (m.crack) { const k = RM ? 1 : Math.min(1, (gtime % 4) / 1.2); ctx.globalAlpha = .5; for (let i = 0; i < 40; i++) { const sx = 40 + i * 6, sy = 150 + Math.round(Math.sin(gtime * 2 + i * .4) * 2); rect(sx, sy, 3, 1, i % 3 ? '#b480ff' : '#ffffff'); } ctx.globalAlpha = 1;
+    const P = [[160, 108], [148, 92], [154, 80], [140, 64], [172, 96], [184, 84], [178, 70], [166, 120], [150, 134]]; for (const [a, b] of [[0, 1], [1, 2], [2, 3], [0, 4], [4, 5], [5, 6], [0, 7], [7, 8]]) { const [x1, y1] = P[a], [x2, y2] = P[b], n = Math.ceil(Math.hypot(x2 - x1, y2 - y1) * k); for (let j = 0; j <= n; j++) { const t = j / Math.max(1, Math.hypot(x2 - x1, y2 - y1)); rect(Math.round(x1 + (x2 - x1) * t), Math.round(y1 + (y2 - y1) * t), 1, 1, '#e8d8ff'); } } }
   m.lines.flatMap(l => wrap(l, 300)).slice(0, 9).forEach((l, i) => T(l, 160, 168 + i * 12, COL.white, 1, 'c'));
   if (Math.floor(gtime * 2) % 2 === 0) T(TOUCH ? 'tap to continue' : 'J to continue', 160, 296, COL.dim, 1, 'c');
   hit(0, 0, LW, LH, nextMsg);
@@ -3135,16 +3243,16 @@ function drawAdmin() {
     y += 6; aBtn(x0, y, 140, 'Unlock all levels', () => { save.unlocked = 11; save.act4 = true; save.cleared = save.cleared.map(() => true); persist(); admToast('All levels open'); }, { col: COL.green });
   } else if (ADM.tab === 'hero') {
     T(charName(c) + '  Lv ' + c.lvl, x0, y, TINT[c.id]); y += 14;
-    lab('Level', y + 4); [['-5', -5], ['-1', -1], ['+1', 1], ['+5', 5], ['Max', 99]].forEach(([s, d], i) => aBtn(70 + i * 46, y, 42, s, () => { c.lvl = clamp(d === 99 ? 20 : c.lvl + d, 1, 20); c.xp = 0; persist(); }));
+    lab('Level', y + 4); [['-5', -5], ['-1', -1], ['+1', 1], ['+5', 5], ['+10', 99]].forEach(([s, d], i) => aBtn(70 + i * 46, y, 42, s, () => { c.lvl = clamp(d === 99 ? c.lvl + 10 : c.lvl + d, 1, 999); c.xp = 0; persist(); }));
     y += 20; lab('XP', y + 4); bar(70, y + 6, 100, 3, c.xp / xpNeed(c.lvl), COL.blue);
-    aBtn(176, y, 64, '+50%', () => { c.xp += Math.round(xpNeed(c.lvl) * .5); while (c.xp >= xpNeed(c.lvl) && c.lvl < 20) { c.xp -= xpNeed(c.lvl); c.lvl++; } persist(); });
+    aBtn(176, y, 64, '+50%', () => { c.xp += Math.round(xpNeed(c.lvl) * .5); while (c.xp >= xpNeed(c.lvl) && c.lvl < 999) { c.xp -= xpNeed(c.lvl); c.lvl++; } persist(); });
     aBtn(244, y, 60, 'Fill', () => { c.xp = xpNeed(c.lvl) - 1; persist(); });
     y += 20; lab('Scrap ' + save.scrap, y + 4); aBtn(176, y, 64, '+10', () => { save.scrap += 10; persist(); }); aBtn(244, y, 60, '+100', () => { save.scrap += 100; persist(); });
     y += 20; lab('Perfects ' + save.perfects, y + 4); aBtn(176, y, 64, '+10', () => { save.perfects += 10; persist(); }); aBtn(244, y, 60, '+100', () => { save.perfects += 100; persist(); });
     y += 22; lab('Class', y + 4); ['warrior', 'archer', 'mage'].forEach((id, i) => aBtn(70 + i * 78, y, 74, CLS[id].n, () => admSwitchClass(id), { sel: save.cls === id, col: TINT[id] }));
     y += 22; lab('Evolution (any tier)', y); y += 12;
     admEvos(c.id).forEach((ks, t) => { T('T' + (t + 1), x0, y + 4, COL.dark); let xx = 34; ks.forEach(k => { const w = textW(EVO[k].n) + 10; if (xx + w > 308) { xx = 34; y += 17; } aBtn(xx, y, w, EVO[k].n, () => admSetEvo(k), { sel: c.evo === k, col: COL.gold }); xx += w + 4; }); y += 18; });
-    aBtn(x0, y, 120, 'No evolution', () => { c.evo = null; persist(); }); aBtn(138, y, 166, 'Unlock all skills', () => { c.lvl = 20; save.cleared = save.cleared.map(() => true); save.unlocked = 11; save.act4 = true; for (const n of buildTree(c.id).N) if (!c.seen.includes(n.id)) c.seen.push(n.id); persist(); admToast('All nodes lit'); }, { col: COL.green });
+    aBtn(x0, y, 120, 'No evolution', () => { c.evo = null; persist(); }); aBtn(138, y, 166, 'Unlock all skills', () => { c.lvl = Math.max(c.lvl, 15); save.cleared = save.cleared.map(() => true); save.unlocked = 11; save.act4 = true; for (const n of buildTree(c.id).N) if (!c.seen.includes(n.id)) c.seen.push(n.id); persist(); admToast('All nodes lit'); }, { col: COL.green });
   } else if (ADM.tab === 'gear') {
     T('Spawn for ' + CLS[c.id].n + '  (bag ' + save.inv.length + '/' + TUNE.invMax + ')', x0, y, COL.white); y += 16;
     lab('Slot', y + 4); SLOTS.forEach((s, i) => aBtn(52 + (i % 3) * 84, y + Math.floor(i / 3) * 18, 80, s, () => { ADM.slot = i; }, { sel: ADM.slot === i }));
@@ -3211,8 +3319,10 @@ function drawUnit(u, i) {
   rect(u.x + lx - w / 2 + 8, u.y, w - 16, 2, '#1a1a22');
   if (u.dash && dash && !RM) for (let g = 2; g >= 1; g--) { const p = Math.max(0, u.dash.t / u.dash.dur - g * .05), k = p < .22 ? ease(p / .22) : 1; drawChar(u.c, Math.round(u.x + u.ox + u.dash.tx * k - u.kb - w / 2), y, PSC, 'flash', { alpha: .14 * g, noCape: true, spr: u.spr }); }
   const vr = u.hurt > 0 && Math.floor(u.hurt * 30) % 2 ? 'hurt' : B.impact > 0 && u.dash ? 'flash' : '';
+  drawUltBack(u, x, y);
   drawChar(u.c, x, y, PSC, vr, { rim: ACTPAL[B.act].rim, dash, seed: u.seed, spr: u.spr, unit: u });
   if (u.cast > 0) { const k = u.cast / .25, cx = x + 44, cy = y + 6; ctx.globalAlpha = k; frame(cx - 6 + k * 2, cy - 6 + k * 2, 12 - k * 4, 12 - k * 4, unitCol(u)); rect(cx - 1, cy - 1, 2, 2, '#ffffff'); ctx.globalAlpha = 1; }
+  drawUltFront(u, x, y);
   if (u.guard) corners(x - 3, y - 3, w + 6, h + 6, COL.blue, 4);
   bar(u.x - 14, u.y - h - 8, 28, 3, u.hp / u.max, '#7ee07e');
   if (u.id === save.active) { const ty = u.y - h - 16 + (Math.floor(B.t * 3) % 2); rect(u.x - 3, ty, 7, 1, '#fff'); rect(u.x - 2, ty + 1, 5, 1, '#fff'); rect(u.x - 1, ty + 2, 3, 1, '#fff'); rect(u.x, ty + 3, 1, 1, '#fff'); }
@@ -3314,7 +3424,7 @@ function drawFx(e) {
 function drawHud() {
   const A = ACTS[B.act];
   if (B.boss && B.boss.exp > .5) { ctx.globalAlpha = .82; rect(0, 250, LW, AH - 250, '#000'); rect(0, 0, LW, 44, '#000'); ctx.globalAlpha = 1; }
-  T(A.roman + '-' + (B.li % 3 + 1) + '  ' + LEVELS[B.li].n, 8, 6, A.c);
+  T(A.roman + '-' + (B.li % 3 + 1) + '  ' + LEVELS[B.li].n, 8, 6, A.c); drawUltHud();
   if (B.combo >= 3) { const big = B.combo >= 10; T(B.combo + ' hits', 312, 19, big ? COL.gold : COL.white, 1, 'r', '#000'); }
   if (B.streak >= 2) T('chain +' + Math.round(Math.min(TUNE.chainMax, TUNE.chainStep * B.streak) * 100) + '%', 312, 31, B.streak >= 10 ? '#ff7a5a' : COL.gold, 1, 'r', '#000');
   T('Wave ' + (B.wave + 1) + '/3', 312, 6, COL.dim, 1, 'r');
@@ -3449,7 +3559,9 @@ function drawStrip() {
   const y = AH + 6, h = STRIP - 12;
   if (scene === 'battle' && B && !B.paused && (B.state === 'fight' || B.state === 'intro' || B.state === 'clear' || B.state === 'boss')) {
     const ready = B.cd <= 0 && B.state === 'fight';
-    btn(8, y, 250, h, mechOf(activeUnit()) === 'bow' ? (B.drawing ? 'LOOSE' : 'DRAW') : mechOf(activeUnit()) === 'rune' ? 'CAST' : 'STRIKE', pressJ, { sc: 2, col: ready ? COL.gold : COL.dim, border: ready ? COL.gold : '#3a3a44', fill: ready ? '#16140a' : '#0c0c10' });
+    const UU = ultOf(activeUnit()), mw = UU ? 186 : 250;
+    if (UU) { const st = ultSt(), full = st.m >= 1 || ADM.ult; btn(198, y, 60, h, st.on ? 'FORM' : 'ULT', ultGo, { col: full || st.on ? UU.c : COL.dim, border: full ? UU.c : '#3a3a44', fill: '#0c0c10' }); if (!st.on && !full) rect(202, y + h - 5, Math.round(52 * st.m), 2, UU.c); }
+    btn(8, y, mw, h, mechOf(activeUnit()) === 'bow' ? (B.drawing ? 'LOOSE' : 'DRAW') : mechOf(activeUnit()) === 'rune' ? 'CAST' : 'STRIKE', pressJ, { sc: 2, col: ready ? COL.gold : COL.dim, border: ready ? COL.gold : '#3a3a44', fill: ready ? '#16140a' : '#0c0c10' });
     btn(266, y, 46, h, 'Menu', () => { B.paused = true; SFX.click(); });
   } else if (scene === 'title' || scene === 'msg' || (scene === 'battle' && B && (B.state === 'win' || B.state === 'lose') && B.st <= 0)) {
     btn(8, y, 304, h, 'Continue', onJ, { sc: 2 });
@@ -3476,6 +3588,7 @@ addEventListener('keydown', e => {
   audio();
   const k = e.code;
   if (k === 'KeyJ' || k === 'Space' || k === 'Enter') { e.preventDefault(); onJ(); return; }
+  if (k === 'KeyK' && scene === 'battle') { e.preventDefault(); ultGo(); return; }
   if (k === 'KeyL') { e.preventDefault(); openAdmin(); return; }
   if (scene === 'admin') { if (k === 'Escape') closeAdmin(); return; }
   if (k === 'KeyM') { save.mute = !save.mute; persist(); }

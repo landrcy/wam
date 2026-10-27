@@ -128,7 +128,7 @@ function strike() {
     q = B.runeQ.every(x => x === 'perfect') ? 'perfect' : 'good';
   }
   if (bv === 'guard' && q === 'miss' && Math.abs(B.mk - B.zw) <= g * .3) { q = 'good'; ward = true; }
-  B.cd = u.s.cd * (B.buff.spd > 0 ? .67 : 1);
+  B.cd = u.s.cd * (B.buff.spd > 0 ? .67 : 1) * ultCdMul();
   B.flash = { q, t: .3, x: B.mk };
   if (q === 'perfect') { save.perfects++; B.streak++; B.perf++; save.bestStreak = Math.max(save.bestStreak, B.streak); }
   else if (q === 'miss') B.streak = 0;
@@ -158,6 +158,7 @@ function attack(u, q, manual) {
   if (grp === 'm') { u.dash = { t: 0, dur: mv === 'blink' ? .18 : manual ? .26 : .22, tx: fx0 - 34 - u.x, ty: f.y - u.y, blink: mv === 'blink' }; dust(u.x, u.y, 5); }
   else if (grp === 'r') u.kb = manual ? (mv === 'snipe' ? 8 : 5) : 3; else u.cast = .25;
   if (B.buff.dmg > 0) dmg *= 1.25;
+  dmg *= ultDmgMul();
   if (manual && unitBar(u) === 'rage') dmg *= 1 + Math.min(.3, B.combo * .02);
   if (u.s.rage) dmg *= 1 + Math.min(.4, (1 - u.hp / u.max) * .6);
   if (u.s.surge && manual && B.streak >= 5) dmg *= 1 + u.s.surge;
@@ -226,6 +227,7 @@ function evoAfterHit(u, f, dmg, q, manual) {
   if (s.rally) { B.buff.dmg = Math.max(B.buff.dmg, s.rally); num(u.x, u.y - 72, 'RALLY', COL.gold); }
   if (s.echo) setTimeout(() => { if (B && !f.dead) { num(cx, cy - 30, 'echo', '#e8ffff'); hitFoe(f, dmg * s.echo, { q: 'good' }, u); } }, 180);
   if (s.nova) { B.novaC[u.id] = (B.novaC[u.id] || 0) + 1; if (B.novaC[u.id] >= s.nova) { B.novaC[u.id] = 0; nova(u, s.novaM, s.holy ? '#fff0a0' : s.burn ? '#ff7a1a' : '#d6a6ff', 'NOVA'); } }
+  if (manual) ultOnHit(u, f, dmg);
   if (s.shieldAll) { B.shC[u.id] = (B.shC[u.id] || 0) + 1; if (B.shC[u.id] >= s.shieldAll) { B.shC[u.id] = 0; B.units.forEach(o => { if (!o.dead) o.guard = 1; }); num(u.x, u.y - 72, 'SHIELD', COL.blue); } }
 }
 function hitFoe(f, dmg, info, u) {
@@ -233,7 +235,9 @@ function hitFoe(f, dmg, info, u) {
   if (f.inv) { const [cx, cy] = foeCenter(f); spark(cx, cy, '#ffffff', 60); return; }
   if (f.T.ghost && info.q === 'good') dmg *= .5;
   if (f.T.plated && info.q === 'good') dmg *= .6;
+  if (u && B.units.includes(u)) { dmg = ultPreHit(u, f, dmg, info); }
   dmg = Math.max(1, Math.round(dmg));
+  if (u && B.units.includes(u) && info.q !== 'splash') ultFill(u, dmg);
   if (ADM.ohk) dmg = Math.max(dmg, f.hp); f.hp -= dmg; const isB = B.boss && B.boss.f === f; f.flash = isB ? (info.manual ? .06 : Math.max(f.flash, 0)) : .09;
   const str = clamp(dmg / f.max * (isB ? 12 : 3), 0, 1); f.kx = Math.round((info.q === 'splash' ? 2 : 4) + str * (isB ? 6 : 16) + (info.q === 'perfect' ? 4 : 0));
   if (info.manual) B.shake = Math.max(B.shake, 1.5 + str * 6 + (info.crit ? 2 : 0));
@@ -264,7 +268,8 @@ function killFoe(f) {
   });
   const lastOne = B.wave === 2 && !liveFoes().length && !B.foes.some(o => o.reviveT > 0);
   if (f.T.boss || lastOne || Math.random() < TUNE.dropChance) {
-    const it = makeItem(f.L + (Math.random() < .3 ? 1 : 0), null, pick(save.party), f.T.boss ? 1 : 0, f.T.boss ? .6 : .1 * B.act);
+    const hl = (save.chars[save.cls] || {}).lvl || 1, il = Math.max(f.L, hl - 2 + Math.floor(Math.random() * 3)); // farming: drops keep pace with the hero's level
+    const it = makeItem(il + (Math.random() < .3 ? 1 : 0), null, pick(save.party), f.T.boss ? 1 : 0, f.T.boss ? .6 : .1 * B.act);
     const [dx0, dy0] = foeCenter(f);
     if (autoEquipDrop(it)) { it.equipped = true; setTimeout(() => { if (B) { num(dx0, dy0 - 30, 'equipped!', COL.gold); B.fx.push({ type: 'ring', x: B.units[0].x, y: B.units[0].y - 24, t: 0, dur: .45, col: COL.gold }); } }, 700); }
     else if (save.autoScrap && isWorse(it)) { it.scrapped = true; save.scrap += it.rar + 1; setTimeout(() => B && num(dx0, dy0 - 30, 'scrapped +' + (it.rar + 1), COL.dim), 500); }
@@ -307,7 +312,7 @@ function foeHit(f) {
     let d = f.dmg * rnd(.9, 1.1) * (P.slam ? .7 : 1) * 30 / (30 + u.s.arm);
     if (P.dodge) { d *= .4; u.hop = .32; num(u.x - 10, u.y - 64, 'dodge', COL.green); }
     if (u.guard) { d *= .5; u.guard = 0; num(u.x, u.y - 64, 'guard', COL.blue); }
-    d = Math.max(1, Math.round(d)); if (ADM.god) d = 0; u.hp -= d;
+    d = Math.max(1, Math.round(d)); d = Math.round(ultTaken(d, u)); if (ADM.god) d = 0; u.hp -= d;
     if (u.s.thorns && !f.dead) hitFoe(f, d * u.s.thorns * 2, { q: 'splash' }, u); u.hurt = .22; u.kb = Math.max(u.kb, P.dodge ? 2 : 7);
     num(u.x + rnd(-5, 5), u.y - 54, '-' + d, COL.red, d > u.max * .2 ? 2 : 1);
     for (let i = 0; i < 8; i++) spark(u.x, u.y - 24, i % 2 ? '#ff5a5a' : '#ffffff', 100);
@@ -356,7 +361,7 @@ function winLevel() {
     save.goblets.push('red');
     msgs.push({ title: 'Act III cleared', char: save.chars[save.cls], col: COL.gold, lines: ['The Black Keep falls silent.', 'Found the Red Goblet.', '', 'But something stirs beyond the keep...', 'The void hungers for perfection.'] });
   }
-  if (act4Ready() && !save.act4) { save.act4 = true; msgs.push({ title: 'A void opens', spr: 'shade', col: '#b480ff', lines: ['Your ' + TUNE.act4Perfects + ' perfect strikes tore the sky.', 'Secret Act IV: The Void is open.'] }); }
+  if (act4Ready() && !save.act4) { save.act4 = true; msgs.push({ title: '...', spr: 'shade', col: '#b480ff', crack: 1, lines: ['But something stirs beyond the glass...', 'An extra challenge awaits.'] }); }
   if (first && li === 11) msgs.push({ title: 'The reflection breaks', spr: 'mirror', col: '#ffffff', lines: ['You beat the secret act.', 'Thanks for testing W.A.M.!'] });
   B.msgs = msgs;
   if (save.unlocked > li && levelOpen(li + 1)) save.sel = li + 1;
@@ -370,7 +375,7 @@ function leaveBattle() {
 }
 
 function updateBattle(dt) {
-  B.t += dt;
+  B.t += dt; updateUlt(dt);
   if (B.banner) { B.banner.t += dt; if (B.banner.t > B.banner.dur) B.banner = null; }
   if (B.tip) { B.tip.t -= dt; if (B.tip.t <= 0) B.tip = null; }
   if (B.hitstop > 0) { B.hitstop -= dt; return; }

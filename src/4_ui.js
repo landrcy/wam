@@ -166,17 +166,19 @@ function bigTitle(inCy, inS) {
       for (let j = 0; j < L.H; j++) for (let i = 0; i < 2; i++) { const px = gx + i - j / 2 | 0; if (L.mask(px, j)) { ctx.fillStyle = '#ffffff'; ctx.fillRect(x + px, y + j, 1, 1); } } ctx.globalAlpha = 1; } }
 }
 function drawCamp() {
-  if (act4Ready() && !save.act4) { save.act4 = true; persist(); msgQueue.push({ title: 'A void opens', spr: 'shade', col: '#b480ff', lines: ['Your ' + TUNE.act4Perfects + ' perfect strikes tore the sky.', 'Secret Act IV: The Void is open.'] }); scene = 'msg'; return; }
+  if (act4Ready() && !save.act4) { save.act4 = true; persist(); msgQueue.push({ title: '...', spr: 'shade', col: '#b480ff', crack: 1, lines: ['But something stirs beyond the glass...', 'An extra challenge awaits.'] }); scene = 'msg'; return; }
   const sa = Math.floor(save.sel / 3);
   drawArena(ACTS[sa].c);
   bigTitle();
   T('Perfect ' + save.perfects, 8, 10, COL.gold);
   btn(240, 6, 72, 16, save.mute ? 'Sound off' : 'Sound on', () => { save.mute = !save.mute; persist(); SFX.click(); }, { col: COL.dim });
-  const showAct4 = save.cleared[8] || save.act4;
+  const showAct4 = true; // the secret act's row always shows how many acts are beaten
+  T('All levels open: pick any', 8, 25, COL.dim);
   for (let a = 0; a < (showAct4 ? 4 : 3); a++) {
     const y = 38 + a * 25, A = ACTS[a], open = a < 3 || save.act4;
     T(A.roman, 10, y + 5, open ? A.c : COL.dark);
     T(a === 3 && !save.act4 ? '? ? ?' : A.n, 34, y + 5, levelOpen(a * 3) ? COL.white : COL.dark);
+    if (a === 3 && save.act4) T('extra challenge', 34, y + 16, '#b480ff');
     for (let l = 0; l < 3; l++) {
       const li = a * 3 + l, x = 166 + l * 48, op = levelOpen(li), sel = save.sel === li;
       btn(x, y, 42, 20, op ? (a + 1) + '-' + (l + 1) : '', op ? () => { save.sel = li; SFX.click(); } : null,
@@ -184,7 +186,7 @@ function drawCamp() {
       if (!op) { rect(x + 18, y + 8, 6, 5, '#2a2a32'); frame(x + 19, y + 5, 4, 4, '#2a2a32'); }
       if (save.cleared[li]) rect(x + 36, y + 3, 3, 3, COL.green);
     }
-    if (a === 3 && !save.act4) T('perfect hits ' + Math.min(save.perfects, TUNE.act4Perfects) + '/' + TUNE.act4Perfects, 34, y + 16, '#5a4a7a');
+    if (a === 3 && !save.act4) T('beat Acts I-III  ' + actsBeaten() + '/3', 34, y + 16, '#5a4a7a');
   }
   // selected level
   const L = LEVELS[save.sel], py = 40 + (showAct4 ? 4 : 3) * 25;
@@ -466,6 +468,8 @@ function drawMsg() {
   rect(160 - w / 2 + 8, 76 + h, w - 16, 3, '#16161c');
   drawSpr(m.spr, 160 - w / 2, 76 - (Math.floor(gtime * 2) % 2), 5, '', FOES[m.spr] && FOES[m.spr].outline || null); }
   for (let i = 0; i < 6; i++) { const a = gtime * 1.5 + i * 1.047, r = 52 + Math.sin(gtime * 3 + i) * 4; rect(160 + Math.cos(a) * r, 108 + Math.sin(a) * r * .6, 2, 2, i % 2 ? m.col : '#ffffff'); }
+  if (m.crack) { const k = RM ? 1 : Math.min(1, (gtime % 4) / 1.2); ctx.globalAlpha = .5; for (let i = 0; i < 40; i++) { const sx = 40 + i * 6, sy = 150 + Math.round(Math.sin(gtime * 2 + i * .4) * 2); rect(sx, sy, 3, 1, i % 3 ? '#b480ff' : '#ffffff'); } ctx.globalAlpha = 1;
+    const P = [[160, 108], [148, 92], [154, 80], [140, 64], [172, 96], [184, 84], [178, 70], [166, 120], [150, 134]]; for (const [a, b] of [[0, 1], [1, 2], [2, 3], [0, 4], [4, 5], [5, 6], [0, 7], [7, 8]]) { const [x1, y1] = P[a], [x2, y2] = P[b], n = Math.ceil(Math.hypot(x2 - x1, y2 - y1) * k); for (let j = 0; j <= n; j++) { const t = j / Math.max(1, Math.hypot(x2 - x1, y2 - y1)); rect(Math.round(x1 + (x2 - x1) * t), Math.round(y1 + (y2 - y1) * t), 1, 1, '#e8d8ff'); } } }
   m.lines.flatMap(l => wrap(l, 300)).slice(0, 9).forEach((l, i) => T(l, 160, 168 + i * 12, COL.white, 1, 'c'));
   if (Math.floor(gtime * 2) % 2 === 0) T(TOUCH ? 'tap to continue' : 'J to continue', 160, 296, COL.dim, 1, 'c');
   hit(0, 0, LW, LH, nextMsg);

@@ -38,8 +38,10 @@ function drawUnit(u, i) {
   rect(u.x + lx - w / 2 + 8, u.y, w - 16, 2, '#1a1a22');
   if (u.dash && dash && !RM) for (let g = 2; g >= 1; g--) { const p = Math.max(0, u.dash.t / u.dash.dur - g * .05), k = p < .22 ? ease(p / .22) : 1; drawChar(u.c, Math.round(u.x + u.ox + u.dash.tx * k - u.kb - w / 2), y, PSC, 'flash', { alpha: .14 * g, noCape: true, spr: u.spr }); }
   const vr = u.hurt > 0 && Math.floor(u.hurt * 30) % 2 ? 'hurt' : B.impact > 0 && u.dash ? 'flash' : '';
+  drawUltBack(u, x, y);
   drawChar(u.c, x, y, PSC, vr, { rim: ACTPAL[B.act].rim, dash, seed: u.seed, spr: u.spr, unit: u });
   if (u.cast > 0) { const k = u.cast / .25, cx = x + 44, cy = y + 6; ctx.globalAlpha = k; frame(cx - 6 + k * 2, cy - 6 + k * 2, 12 - k * 4, 12 - k * 4, unitCol(u)); rect(cx - 1, cy - 1, 2, 2, '#ffffff'); ctx.globalAlpha = 1; }
+  drawUltFront(u, x, y);
   if (u.guard) corners(x - 3, y - 3, w + 6, h + 6, COL.blue, 4);
   bar(u.x - 14, u.y - h - 8, 28, 3, u.hp / u.max, '#7ee07e');
   if (u.id === save.active) { const ty = u.y - h - 16 + (Math.floor(B.t * 3) % 2); rect(u.x - 3, ty, 7, 1, '#fff'); rect(u.x - 2, ty + 1, 5, 1, '#fff'); rect(u.x - 1, ty + 2, 3, 1, '#fff'); rect(u.x, ty + 3, 1, 1, '#fff'); }
@@ -141,7 +143,7 @@ function drawFx(e) {
 function drawHud() {
   const A = ACTS[B.act];
   if (B.boss && B.boss.exp > .5) { ctx.globalAlpha = .82; rect(0, 250, LW, AH - 250, '#000'); rect(0, 0, LW, 44, '#000'); ctx.globalAlpha = 1; }
-  T(A.roman + '-' + (B.li % 3 + 1) + '  ' + LEVELS[B.li].n, 8, 6, A.c);
+  T(A.roman + '-' + (B.li % 3 + 1) + '  ' + LEVELS[B.li].n, 8, 6, A.c); drawUltHud();
   if (B.combo >= 3) { const big = B.combo >= 10; T(B.combo + ' hits', 312, 19, big ? COL.gold : COL.white, 1, 'r', '#000'); }
   if (B.streak >= 2) T('chain +' + Math.round(Math.min(TUNE.chainMax, TUNE.chainStep * B.streak) * 100) + '%', 312, 31, B.streak >= 10 ? '#ff7a5a' : COL.gold, 1, 'r', '#000');
   T('Wave ' + (B.wave + 1) + '/3', 312, 6, COL.dim, 1, 'r');
@@ -276,7 +278,9 @@ function drawStrip() {
   const y = AH + 6, h = STRIP - 12;
   if (scene === 'battle' && B && !B.paused && (B.state === 'fight' || B.state === 'intro' || B.state === 'clear' || B.state === 'boss')) {
     const ready = B.cd <= 0 && B.state === 'fight';
-    btn(8, y, 250, h, mechOf(activeUnit()) === 'bow' ? (B.drawing ? 'LOOSE' : 'DRAW') : mechOf(activeUnit()) === 'rune' ? 'CAST' : 'STRIKE', pressJ, { sc: 2, col: ready ? COL.gold : COL.dim, border: ready ? COL.gold : '#3a3a44', fill: ready ? '#16140a' : '#0c0c10' });
+    const UU = ultOf(activeUnit()), mw = UU ? 186 : 250;
+    if (UU) { const st = ultSt(), full = st.m >= 1 || ADM.ult; btn(198, y, 60, h, st.on ? 'FORM' : 'ULT', ultGo, { col: full || st.on ? UU.c : COL.dim, border: full ? UU.c : '#3a3a44', fill: '#0c0c10' }); if (!st.on && !full) rect(202, y + h - 5, Math.round(52 * st.m), 2, UU.c); }
+    btn(8, y, mw, h, mechOf(activeUnit()) === 'bow' ? (B.drawing ? 'LOOSE' : 'DRAW') : mechOf(activeUnit()) === 'rune' ? 'CAST' : 'STRIKE', pressJ, { sc: 2, col: ready ? COL.gold : COL.dim, border: ready ? COL.gold : '#3a3a44', fill: ready ? '#16140a' : '#0c0c10' });
     btn(266, y, 46, h, 'Menu', () => { B.paused = true; SFX.click(); });
   } else if (scene === 'title' || scene === 'msg' || (scene === 'battle' && B && (B.state === 'win' || B.state === 'lose') && B.st <= 0)) {
     btn(8, y, 304, h, 'Continue', onJ, { sc: 2 });
@@ -303,6 +307,7 @@ addEventListener('keydown', e => {
   audio();
   const k = e.code;
   if (k === 'KeyJ' || k === 'Space' || k === 'Enter') { e.preventDefault(); onJ(); return; }
+  if (k === 'KeyK' && scene === 'battle') { e.preventDefault(); ultGo(); return; }
   if (k === 'KeyL') { e.preventDefault(); openAdmin(); return; }
   if (scene === 'admin') { if (k === 'Escape') closeAdmin(); return; }
   if (k === 'KeyM') { save.mute = !save.mute; persist(); }
