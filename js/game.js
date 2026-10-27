@@ -24,6 +24,13 @@ function resize() {
 addEventListener('resize', resize); resize();
 
 // ---------- tuning knobs (tweak here) ----------
+// per-path balance: d = damage, b = extra vs bosses / a lone foe, s = splash to two other foes, t = damage taken
+const PATHBAL = { archer: { t: .72 }, mage: { t: .75 },
+  bastion: { d: 1.2 }, sunknight: { t: .85 }, seraph: { d: 1.1, s: .2 }, reaper: { s: .25 },
+  wildlord: { d: 1.25, b: 1.1 }, packleader: { d: 1.15, t: .9 }, tempest: { b: 1.35 }, skyhunter: { d: 1.1 }, nightstalker: { d: 1.15, t: .85, s: .2 }, phantom: { d: 1.1, s: .25, t: .9 }, marksman: { s: .3 }, hawkeye: { s: .3, t: .88 },
+  hellcaller: { d: 1.4, t: .75 }, cinderlord: { d: 1.3, t: .7 }, sunflare: { d: 1.25, t: .9 }, ashborn: { d: 1.45, s: .2 }, glacier: { d: 1.5, b: 1.15, s: .2 }, blizzard: { d: 1.45, b: 1.35, t: .9 }, timeweaver: { d: 1.8, b: 1.1, s: .25 }, voidwalker: { d: 1.5, b: 1.2, s: .25 } };
+function pathBal() { const o = { d: 1, b: 1, s: 0, t: 1 }, h = save && save.chars && save.chars[save.cls]; if (!h) return o; const ch = [save.cls]; let k = h.evo; while (k && typeof EVO !== 'undefined' && EVO[k]) { ch.push(k); k = EVO[k].from; }
+  for (const c of ch) { const v = PATHBAL[c]; if (v) for (const x in v) o[x] = x === 's' ? Math.max(o.s, v.s) : o[x] * v[x]; } return o; }
 const TUNE = {
   markerSpeed: 1.12,      // timing-bar sweeps per second (base)
   goodZone: 0.19,         // width of the GOOD zone (fraction of bar)
@@ -760,7 +767,7 @@ Pix.prototype.raw = function (x, y) { return x < 0 || y < 0 || x >= this.w || y 
 Pix.prototype.put = function (x, y, mat, s = 2) { x = Math.floor(x) + this.ox; y = Math.floor(y) + this.oy; if (x < 0 || y < 0 || x >= this.w || y >= this.h) return; const i = y * this.w + x; this.m[i] = mat; this.s[i] = clamp(s, 0, 3); };
 Pix.prototype.at = function (x, y) { x += this.ox; y += this.oy; return x < 0 || y < 0 || x >= this.w || y >= this.h ? null : this.m[y * this.w + x]; };
 Pix.prototype.clear = function (x, y) { x += this.ox; y += this.oy; if (x >= 0 && y >= 0 && x < this.w && y < this.h) this.m[y * this.w + x] = null; };
-const lit = (nx, ny, nz, x, y) => { const l = -nx * .55 - ny * .65 + nz * .52 + (((x + y) & 1) ? .05 : -.05); return l > .6 ? 3 : l > .22 ? 2 : l > -.18 ? 1 : 0; };
+let lit = (nx, ny, nz, x, y) => { const l = -nx * .55 - ny * .65 + nz * .52 + (((x + y) & 1) ? .05 : -.05); return l > .6 ? 3 : l > .22 ? 2 : l > -.18 ? 1 : 0; };
 Pix.prototype.ell = function (cx, cy, rx, ry, mat, o = {}) {
   for (let y = Math.floor(cy - ry); y <= Math.ceil(cy + ry); y++) for (let x = Math.floor(cx - rx); x <= Math.ceil(cx + rx); x++) {
     const nx = (x + .5 - cx) / rx, ny = (y + .5 - cy) / ry, d = nx * nx + ny * ny; if (d > 1) continue;
@@ -1248,6 +1255,84 @@ function drawEvoFront(c, x, y, sc, variant, A) {
   if (dec.includes('pauldrons')) { P(D.fx - 2, D.tor[0] - 1, '#a8aebc', 2, 2); P(D.fx + 6, D.tor[0] - 1, '#6a7080', 2, 2); }
   if (dec.includes('scarf')) { const w = RM ? 0 : Math.round(Math.sin(gtime * 6)); P(D.fx, D.tor[0] - 1, L.cape || '#78d6ee', 6, 1); P(D.fx - 2, D.tor[0] + w, L.cape || '#78d6ee', 2, 1); P(D.fx - 4, D.tor[0] + 1 + w, darken(L.cape || '#78d6ee', .3), 2, 1); }
 }
+// ================= HD painter for bosses =================
+// Same shape calls as Pix, but rasterised R times finer (1 fine pixel = 1 screen pixel in the box),
+// baked with 6-step hue-shifted ramps, ordered dither, per-material texture, thick rim light and glow halos.
+const RAMP6 = {};
+function ramp6(m) {
+  if (RAMP6[m]) return RAMP6[m]; const r = RAMP[m];
+  return (RAMP6[m] = [hexMix(r[0], '#120a22', .25), hexMix(r[0], r[1], .5), r[1], hexMix(r[1], r[2], .55), r[2], hexMix(r[3], '#fff4dc', .12), r[3]]);
+}
+const hh = (x, y, s = 0) => { let h = (x * 374761393 + y * 668265263 + s * 2147483647) | 0; h = (h ^ (h >>> 13)) * 1274126177 | 0; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
+function vn(x, y, s = 0) { const xi = Math.floor(x), yi = Math.floor(y), fx = x - xi, fy = y - yi, u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy);
+  const a = hh(xi, yi, s), b = hh(xi + 1, yi, s), c = hh(xi, yi + 1, s), d = hh(xi + 1, yi + 1, s); return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v; }
+// texture: shade offset (in 0..6 ramp steps) per material at fine pixel x,y
+const TEX = {
+  skin: (x, y) => (vn(x / 7, y / 7, 1) - .5) * 1.4 + (hh(x, y, 2) < .035 ? -1.6 : 0) + (vn(x / 2.5, y / 2.5, 3) > .82 ? .9 : 0),
+  bark: (x, y) => Math.sin(x * .7 + vn(x / 6, y / 14, 4) * 7) * .9 + (vn(x / 3, y / 3, 5) > .86 ? -1.6 : 0),
+  wood: (x, y) => Math.sin(y * .5 + vn(x / 10, y / 4, 6) * 5) * .6,
+  iron: (x, y) => (vn(x / 18, y / 1.6, 7) - .5) * .8 + (Math.abs(vn(x / 9, y / 9, 8) - .5) < .025 ? 1.4 : 0) + (x % 14 === 3 && y % 14 === 3 ? 2 : x % 14 === 4 && y % 14 === 4 ? -2 : 0),
+  steel: (x, y) => (vn(x / 20, y / 1.4, 9) - .5) * .9 + ((x + y * 2) % 23 === 0 && hh(x >> 3, y >> 3, 1) < .3 ? 1.3 : 0),
+  dark: (x, y) => (vn(x / 12, y / 2, 10) - .5) * .9 + (Math.abs(vn(x / 7, y / 7, 11) - .5) < .02 ? 1.5 : 0),
+  stone: (x, y) => (vn(x / 5, y / 5, 12) - .5) * 1.2 + (Math.abs(vn(x / 8, y / 8, 13) - .5) < .035 ? -2.2 : 0),
+  leather: (x, y) => (vn(x / 4, y / 4, 14) - .5) * .9 + ((x + (y >> 2)) % 9 === 0 && y % 4 < 2 ? 1 : 0),
+  cloth: (x, y) => ((x + y) % 4 < 2 ? .35 : -.35) + (vn(x / 9, y / 9, 15) - .5) * .8,
+  red: (x, y) => (vn(x / 5, y / 5, 16) - .5) * 1.2 + (hh(x, y, 17) < .04 ? -1.4 : 0),
+  bone: (x, y) => (vn(x / 4, y / 4, 18) - .5) * .8 + (hh(x, y, 19) < .05 ? -1.3 : 0),
+  leaf: (x, y) => (vn(x / 2.2, y / 2.2, 20) - .5) * 2.2, moss: (x, y) => (vn(x / 2, y / 2, 21) - .5) * 2.2,
+  gold: (x, y) => (vn(x / 6, y / 2, 22) - .5) * .8 + (hh(x, y, 23) < .02 ? 2 : 0),
+  glass: (x, y) => (Math.floor((x * .7 + y) / 7) % 2 ? .7 : -.4) + (hh(x, y, 24) < .01 ? 3 : 0), purple: (x, y) => (Math.floor((x - y * .6) / 6) % 2 ? .6 : -.4),
+  void: (x, y) => (vn(x / 4, y / 4, 25) - .5) * 1.6, fire: (x, y) => (vn(x / 3, y / 5, 26) - .5) * 1.8, ember: (x, y) => (vn(x / 3, y / 3, 27) - .5) * 1.6,
+  rust: (x, y) => (vn(x / 4, y / 4, 28) - .5) * 1.6, black: (x, y) => (vn(x / 8, y / 8, 29) - .5) * .6,
+};
+const BAYER = [[0, .5], [.75, .25]];
+const lit4 = lit, lit6 = (nx, ny, nz, x, y) => { const l = -nx * .55 - ny * .65 + nz * .52; return clamp((l + .55) / 1.35 * 3.2, 0, 3.49); };
+function HD(w, h, ox, oy, R) { Pix.call(this, w * R, h * R, ox * R, oy * R); this.R = R; this.sf = new Float32Array(w * R * h * R); }
+HD.prototype = Object.create(Pix.prototype);
+HD.prototype.put = function (x, y, mat, s = 2) { x = Math.floor(x) + this.ox; y = Math.floor(y) + this.oy; if (x < 0 || y < 0 || x >= this.w || y >= this.h) return; const i = y * this.w + x; this.m[i] = mat; this.sf[i] = clamp(s, 0, 4); };
+const HDW = (fn) => function (...a) { lit = lit6; try { return fn.apply(this, a); } finally { lit = lit4; } };
+HD.prototype.ell = HDW(function (cx, cy, rx, ry, mat, o) { const R = this.R; return Pix.prototype.ell.call(this, cx * R, cy * R, rx * R, ry * R, mat, o); });
+HD.prototype.box = HDW(function (x0, y0, w, h, mat, o = {}) { const R = this.R, X = Math.round(x0 * R), Y = Math.round(y0 * R), W = Math.round(w * R), H = Math.round(h * R);
+  if (o.flat != null || o.cyl) return Pix.prototype.box.call(this, X, Y, W, H, mat, o);
+  for (let y = Y; y < Y + H; y++) for (let x = X; x < X + W; x++) { if (o.only && !this.at(x, y)) continue; const e = Math.min(x - X, y - Y), e2 = Math.min(X + W - 1 - x, Y + H - 1 - y); this.put(x, y, mat, (e < R * .6 ? 3.2 : e2 < R * .6 ? 1 : 2.1) + (o.b || 0)); } return this; });
+HD.prototype.poly = HDW(function (pts, mat, o) { const R = this.R; return Pix.prototype.poly.call(this, pts.map(([x, y]) => [x * R, y * R]), mat, o); });
+HD.prototype.line = HDW(function (ax, ay, bx, by, r0, mat, r1 = r0, o) { const R = this.R; return Pix.prototype.line.call(this, ax * R, ay * R, bx * R, by * R, r0 * R, mat, r1 * R, o); });
+HD.prototype.px = function (x, y, mat, s = 2) { const R = this.R; for (let j = 0; j < R; j++) for (let i = 0; i < R; i++) this.put(Math.floor(x) * R + i, Math.floor(y) * R + j, mat, s + (i + j < R * .6 ? .6 : i + j > R * 1.3 ? -.6 : 0)); return this; };
+// fine-pixel helpers for small sub-forms (coordinates in design units, sizes may be fractional)
+HD.prototype.dot = function (x, y, mat, s = 2.5) { this.put(x * this.R, y * this.R, mat, s); return this; };
+HD.prototype.fline = function (ax, ay, bx, by, mat, s = 2) { const R = this.R, n = Math.ceil(Math.hypot(bx - ax, by - ay) * R) + 1; for (let i = 0; i <= n; i++) { const t = i / n; this.put((ax + (bx - ax) * t) * R, (ay + (by - ay) * t) * R, mat, s); } return this; };
+HD.prototype.spike = function (x, y, ang, len, w, mat) { const [tx, ty] = [x + Math.cos(ang) * len, y + Math.sin(ang) * len]; return this.line(x, y, tx, ty, w, mat, .12); };
+HD.prototype.face = function (x, y, r, mat, eye = 'black', open = 1) { // a small fused face: brow, eyes, nose, mouth
+  this.ell(x, y, r, r * 1.15, mat); this.ell(x - r * .38, y - r * .15, r * .22, r * .18 * open + .05, eye); this.ell(x + r * .38, y - r * .15, r * .22, r * .18 * open + .05, eye);
+  this.fline(x - r * .6, y - r * .45, x - r * .15, y - r * .38, mat, 3.2); this.fline(x + r * .15, y - r * .38, x + r * .6, y - r * .45, mat, 3.2);
+  this.fline(x, y - r * .05, x, y + r * .25, mat, 1); this.ell(x, y + r * .55, r * .3, r * .14 + .05, 'black'); return this; };
+HD.prototype.glowc = function (x, y, r, mat) { const R = this.R; for (let j = -r * R; j <= r * R; j++) for (let i = -r * R; i <= r * R; i++) { const d = Math.hypot(i, j) / (r * R); if (d <= 1) this.put(x * R + i, y * R + j, mat, 3.4 * (1 - d * .85) + (((i * 3 + j * 5) & 7) === 0 && d > .4 ? -.8 : 0)); } return this; };
+HD.prototype.bake = function (o = {}) {
+  const w = this.w, h = this.h, P = 2, cvs = document.createElement('canvas'); cvs.width = w + P * 2; cvs.height = h + P * 2; cvs.R = this.R;
+  const g = cvs.getContext('2d'), img = g.createImageData(cvs.width, cvs.height), D = img.data, M = this.m, S = this.sf, R = this.R;
+  const at = (x, y) => x < 0 || y < 0 || x >= w || y >= h ? null : M[y * w + x];
+  const set = (x, y, c, a = 255) => { const i = ((y + P) * cvs.width + x + P) * 4; D[i] = parseInt(c.slice(1, 3), 16); D[i + 1] = parseInt(c.slice(3, 5), 16); D[i + 2] = parseInt(c.slice(5, 7), 16); D[i + 3] = a; };
+  const rimW = Math.max(1, R >> 1);
+  for (let y = -P; y < h + P; y++) for (let x = -P; x < w + P; x++) {
+    const m = at(x, y);
+    if (m) {
+      let v = S[y * w + x] * 1.75; // 0..~6
+      let ul = 0, lr = 0; for (let k = 1; k <= rimW; k++) { if (at(x - k, y - k) !== m && !at(x - k, y - k)) ul = 1; if (at(x + k, y + k) !== m && !at(x + k, y + k)) lr = 1; }
+      if (ul) v += 1.1; if (lr) v -= 1.1;
+      if (at(x, y - 1) && at(x, y - 1) !== m && !GLOWS.has(m)) v -= .7; // contact shadow under other parts
+      if (TEX[m] && !o.noTex) v += TEX[m](x, y);
+      v += BAYER[y & 1][x & 1] - .4;
+      const c = ramp6(m)[clamp(Math.round(v), 0, 6)];
+      set(x, y, o.tint ? o.tint(c, m) : c);
+    } else {
+      let n = 0, gl = null, near = null;
+      for (const [a, b] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const q = at(x + a, y + b); if (q) { if (GLOWS.has(q)) gl = gl || q; else { n++; near = q; } } }
+      if (n && !o.noOutline) set(x, y, hexMix(RAMP[near][0], '#05040a', .6));
+      else if (!o.noGlow) { let best = null, bd = 9; for (let j = -3; j <= 3; j++) for (let i = -3; i <= 3; i++) { const q = at(x + i, y + j); if (q && GLOWS.has(q)) { const d = Math.hypot(i, j); if (d < bd) { bd = d; best = q; } } } if (best) set(x, y, RAMP[best][1], Math.round(170 * (1 - bd / 4.3))); }
+    }
+  }
+  g.putImageData(img, 0, 0); return cvs;
+};
 // ================= skill constellation =================
 // No points: nodes light up on their own at level milestones or boss clears. The only choices are the forks,
 // which are the evolution splits (tier 1 at Lv 5, tier 2 at Lv 9, tier 3 at Lv 13). Passive, active and
@@ -1602,7 +1687,7 @@ function attack(u, q, manual) {
   u.lt = .16;
   if (q === 'miss') {
     SFX.miss(); num(...foeCenter(f), 'miss', COL.dim);
-    if (f.T.mirror) { const h = Math.round(f.max * .06); f.hp = Math.min(f.max, f.hp + h); num(foeCenter(f)[0], foeCenter(f)[1] - 12, '+' + h, COL.green); }
+    if (f.T.mirror) { const hl = (save.chars[save.cls] || {}).lvl || 1, h = Math.round(f.max * .06 * clamp(1 - (hl - 15) * .05, .2, 1) * (save.cls === 'warrior' ? 1 : .6)); f.hp = Math.min(f.max, f.hp + h); num(foeCenter(f)[0], foeCenter(f)[1] - 12, '+' + h, COL.green); }
     return;
   }
   let dmg = u.s.dmg * (q === 'perfect' ? u.s.perfMult : 1);
@@ -1612,12 +1697,13 @@ function attack(u, q, manual) {
   if (grp === 'm') { u.dash = { t: 0, dur: mv === 'blink' ? .18 : manual ? .26 : .22, tx: fx0 - 34 - u.x, ty: f.y - u.y, blink: mv === 'blink' }; dust(u.x, u.y, 5); }
   else if (grp === 'r') u.kb = manual ? (mv === 'snipe' ? 8 : 5) : 3; else u.cast = .25;
   if (B.buff.dmg > 0) dmg *= 1.25;
-  dmg *= ultDmgMul();
+  dmg *= ultDmgMul(); const PB = pathBal(); dmg *= PB.d * (f.T.boss || liveFoes().length === 1 ? PB.b : 1);
   if (manual && unitBar(u) === 'rage') dmg *= 1 + Math.min(.3, B.combo * .02);
   if (u.s.rage) dmg *= 1 + Math.min(.4, (1 - u.hp / u.max) * .6);
   if (u.s.surge && manual && B.streak >= 5) dmg *= 1 + u.s.surge;
   const crit = Math.random() * 100 < u.s.crit; if (crit) dmg *= u.s.critDmg;
   const info = { q, crit, manual };
+  if (PB.s && manual) liveFoes().filter(o => o !== f).slice(0, 2).forEach(o => hitFoe(o, dmg * PB.s, { q: 'splash' }, u));
   if (manual && q === 'perfect') {
     B.hitstop = .055; B.shake = Math.max(B.shake, 3);
     if (f.wind > 0 || f.pend) {
@@ -1766,7 +1852,7 @@ function foeHit(f) {
     let d = f.dmg * rnd(.9, 1.1) * (P.slam ? .7 : 1) * 30 / (30 + u.s.arm);
     if (P.dodge) { d *= .4; u.hop = .32; num(u.x - 10, u.y - 64, 'dodge', COL.green); }
     if (u.guard) { d *= .5; u.guard = 0; num(u.x, u.y - 64, 'guard', COL.blue); }
-    d = Math.max(1, Math.round(d)); d = Math.round(ultTaken(d, u)); if (ADM.god) d = 0; u.hp -= d;
+    d = Math.max(1, Math.round(d)); d = Math.round(ultTaken(d * pathBal().t, u)); if (ADM.god) d = 0; u.hp -= d;
     if (u.s.thorns && !f.dead) hitFoe(f, d * u.s.thorns * 2, { q: 'splash' }, u); u.hurt = .22; u.kb = Math.max(u.kb, P.dodge ? 2 : 7);
     num(u.x + rnd(-5, 5), u.y - 54, '-' + d, COL.red, d > u.max * .2 ? 2 : 1);
     for (let i = 0; i < 8; i++) spark(u.x, u.y - 24, i % 2 ? '#ff5a5a' : '#ffffff', 100);
@@ -2160,12 +2246,13 @@ function artMirror(P, ph, a) {
   if (D) for (const [x, y] of [[-10, 28], [6, 22], [11, 36], [-4, 40]]) P.line(r.X(x), r.Y(y), r.X(x + 4), r.Y(y - 5), .5, 'void', .5);
 }
 const BOSSART = { gobchief: artGob, treant: artTreant, darkknight: artKnight, mirror: artMirror };
-const bfCache = new Map();
+const bfCache = new Map(), BHD = 4; // bosses are painted 4x finer than their design grid
+const BDETAIL = {};
 function bossFrame(k, ph, a) {
   const key = k + ph + '|' + a.br + a.wu + a.at + a.fl + a.sp; let c = bfCache.get(key); if (c) return c;
-  const P = new Pix(BW, BH, BOX, BOY);
-  BOSSART[k](P, ph, { br: a.br, wu: a.wu / 4, at: a.at / 6, fl: a.fl, sp: a.sp / 6 });
-  c = P.bake(); if (bfCache.size > 600) bfCache.clear(); bfCache.set(key, c); return c;
+  const P = new HD(BW, BH, BOX, BOY, BHD);
+  const A = { br: a.br, wu: a.wu / 4, at: a.at / 6, fl: a.fl, sp: a.sp / 6 }; BOSSART[k](P, ph, A);
+  if (BDETAIL[k]) BDETAIL[k](P, ph, A); c = P.bake(); if (bfCache.size > 90) bfCache.delete(bfCache.keys().next().value); bfCache.set(key, c); return c;
 }
 const bossPat = () => B && B.boss && B.boss.st !== 'outro' && B.boss.st !== 'done' ? BOSS[B.boss.k].pats[B.boss.phase] : null;
 function bossFlash(col, dur = .35) { if (B.boss) B.boss.flash = { col, t: 0, dur }; }
@@ -2210,9 +2297,9 @@ function bossStart(f) {
 // sample the visible pixels of a boss frame into flying particles (transforms, death)
 function bossBits(cv, x0, y0, n, sp, life) {
   const g = cv.getContext('2d'), d = g.getImageData(0, 0, cv.width, cv.height).data, pts = [];
-  for (let y = 0; y < cv.height; y += 2) for (let x = 0; x < cv.width; x += 2) { const i = (y * cv.width + x) * 4; if (d[i + 3] > 200) pts.push([x, y, '#' + [d[i], d[i + 1], d[i + 2]].map(v => v.toString(16).padStart(2, '0')).join('')]); }
+  for (let y = 0; y < cv.height; y += 2 * (cv.R || 1)) for (let x = 0; x < cv.width; x += 2 * (cv.R || 1)) { const i = (y * cv.width + x) * 4; if (d[i + 3] > 200) pts.push([x, y, '#' + [d[i], d[i + 1], d[i + 2]].map(v => v.toString(16).padStart(2, '0')).join('')]); }
   for (let k = 0; k < n && pts.length; k++) {
-    const [x, y, col] = pts[Math.floor(Math.random() * pts.length)], S = (B.boss && B.boss.f.sc) || PSC, px = x0 + x * S, py = y0 + y * S, cx = x0 + cv.width * S / 2, cy = y0 + cv.height * S * .6;
+    const [x, y, col] = pts[Math.floor(Math.random() * pts.length)], S = ((B.boss && B.boss.f.sc) || PSC) / (cv.R || 1), px = x0 + x * S, py = y0 + y * S, cx = x0 + cv.width * S / 2, cy = y0 + cv.height * S * .6;
     const an = Math.atan2(py - cy, px - cx) + rnd(-.4, .4), v = rnd(.3, 1) * sp;
     B.parts.push({ x: px, y: py, vx: Math.cos(an) * v, vy: Math.sin(an) * v - 40, t: 0, life: rnd(.5, 1) * life, col, s: S, g: 220 });
   }
@@ -2248,8 +2335,9 @@ function bossShatter(f) {
 // where the boss fights from once it has broken out: beside the box on wide screens, looming above it on tall ones
 function bossOutPos(bo) {
   const side = bo.side || 1;
-  if (OX >= 150) { const sc = clamp(Math.floor((OX + 30) / BW), 2, 4); return { x: side > 0 ? LW + Math.min(OX * .5, BW * sc * .42) : -Math.min(OX * .5, BW * sc * .42), y: LH * .78, sc, where: 'side' }; }
-  if (OY >= 40) { const sc = clamp(Math.floor((OY + 100) / BH), 2, 4); return { x: 160 + side * 40, y: clamp(BH * sc - OY + 2, -6, 96), sc, where: 'top' }; } // looms over the top of the box
+  // towers over the whole screen: taller than the viewport, head and arms cropped, feet below the bottom edge
+  if (OX >= 110) { const sc = clamp(Math.round(VH * 1.12 / 64), 4, 14); return { x: side > 0 ? LW + BW * sc * .3 : -BW * sc * .3, y: VH - OY + sc * 4, sc, where: 'side' }; }
+  if (OY >= 40) { const sc = clamp(Math.round(VW * 1.15 / 64), 4, 10); return { x: 160 + side * 30, y: clamp(64 * sc * .5 - OY, 20, 120), sc, where: 'top' }; } // looms over the top of the box
   return { x: BOSS_POS[0], y: BOSS_POS[1], sc: PSC, where: 'in' };
 }
 function bossMove(bo, dur) { const f = bo.f; bo.mv = { t: 0, dur, x0: f.x, y0: f.y, s0: f.sc, to: bossOutPos(bo), broke: false }; }
@@ -2311,7 +2399,7 @@ function updateBoss(dt) {
 }
 function mkReasm(cv) { // pixel list with scattered start positions: the new form flies together
   const g = cv.getContext('2d'), d = g.getImageData(0, 0, cv.width, cv.height).data, px = [];
-  for (let y = 0; y < cv.height; y++) for (let x = 0; x < cv.width; x++) { const i = (y * cv.width + x) * 4; if (d[i + 3] > 0) px.push([x, y, 'rgba(' + d[i] + ',' + d[i + 1] + ',' + d[i + 2] + ',' + (d[i + 3] / 255).toFixed(2) + ')', rnd(-40, 40), rnd(-30, 30), rnd(0, .35)]); }
+  const st = cv.R ? 2 : 1; for (let y = 0; y < cv.height; y += st) for (let x = 0; x < cv.width; x += st) { const i = (y * cv.width + x) * 4; if (d[i + 3] > 0) px.push([x, y, 'rgba(' + d[i] + ',' + d[i + 1] + ',' + d[i + 2] + ',' + (d[i + 3] / 255).toFixed(2) + ')', rnd(-40, 40) * (cv.R || 1), rnd(-30, 30) * (cv.R || 1), rnd(0, .35)]); }
   return px;
 }
 // ---------- boss attacks: a unique move per boss and phase ----------
@@ -2320,7 +2408,8 @@ function bossAttackFx(f, targets, slam) {
   const add = e => B.fx.push(Object.assign({ t: 0 }, e));
   if (out) { // an arm / tendril smashes in through the cracked frame, then the attack lands
     const ex = bcx > LW ? LW : bcx < 0 ? 0 : clamp(bcx, 20, LW - 20), ey = bcx > LW || bcx < 0 ? clamp(bcy, 60, 240) : 0;
-    targets.forEach(u => add({ type: 'reach', x0: bcx, y0: bcy, ex, ey, x: u.x + 14, y: u.y - 22, dur: .42, col: bo.D.crack }));
+    giantSwing(f, targets);
+    if (bo.k === 'mirror') targets.forEach(u => add({ type: 'reach', x0: bcx, y0: bcy, ex, ey, x: u.x + 14, y: u.y - 22, dur: .42, col: bo.D.crack }));
     addCracks(2, B.t);
   }
   const tx = targets.map(u => [u.x, u.y]);
@@ -2341,6 +2430,7 @@ function bossAttackFx(f, targets, slam) {
   }
 }
 function drawBossFx(e) {
+  if (e.type === 'giant') return drawGiant(e);
   const p = clamp(e.t / e.dur, 0, 1);
   if (e.type === 'shock') { // ground shockwave rolling toward the party
     const x = e.x + (e.to - e.x) * Math.min(1, p * 2.4), a = p < .6 ? 1 : (1 - p) / .4;
@@ -2384,27 +2474,29 @@ function drawBossFx(e) {
 }
 // draw the boss body: transforms, flicker, reassembly, orbiting shards, glitch rows
 function drawBossBody(f, x, y) {
-  const bo = B.boss, pose = bossPose(f), sc = f.sc || PSC, X = x - sc, Y = y - sc;
+  const bo = B.boss, pose = bossPose(f), S0 = f.sc || PSC, lk = bo.outside && !RM ? (pose.at > 0 ? 1 - Math.abs(pose.at - 3) / 3 : pose.wu / 8) : 0, SC = S0 * (1 + .07 * lk);
+  x -= (SC - S0) * BW / 2 + (bo.outside ? (x > 160 ? -1 : 1) * lk * 10 : 0); y -= (SC - S0) * BH;
   let cv = bossFrame(bo.k, bo.phase, pose); f._cv = cv;
+  const sc = SC / (cv.R || 1), X = x - 2 * sc, Y = y - 2 * sc; // sc: screen pixels per fine pixel
   const W = cv.width * sc, H = cv.height * sc, flash = f.flash > 0;
   // aura behind (rage / spirit) from phase 1 on
-  if (bo.phase > 0 && !RM) { ctx.globalAlpha = .18 + .08 * Math.sin(B.t * 5); const t2 = tinted(cv, bo.D.crack); for (const [a, b] of [[-sc, 0], [sc, 0], [0, -sc], [0, sc]]) ctx.drawImage(t2, X + a * 2, Y + b * 2, W, H); ctx.globalAlpha = 1; }
+  if (bo.phase > 0 && !RM) { ctx.globalAlpha = .18 + .08 * Math.sin(B.t * 5); const t2 = tinted(cv, bo.D.crack); for (const [a, b] of [[-SC, 0], [SC, 0], [0, -SC], [0, SC]]) ctx.drawImage(t2, X + a, Y + b, W, H); ctx.globalAlpha = 1; }
   if (bo.k === 'mirror' && bo.phase >= 2) drawShardOrbit(f, x, y, true);
   if (bo.st === 'phase') {
     const t = bo.t;
     if (t < .45 && bo.old) { // old form trembles and flickers white
-      const j = RM ? 0 : Math.round(rnd(-1, 1)) * sc; ctx.drawImage(Math.floor(t * 20) % 2 ? tinted(bo.old, '#ffffff') : bo.old, X + j, Y, W, H); return;
+      const j = RM ? 0 : Math.round(rnd(-1, 1)) * SC; ctx.drawImage(Math.floor(t * 20) % 2 ? tinted(bo.old, '#ffffff') : bo.old, X + j, Y, W, H); return;
     }
     const rv = clamp((t - .45) / .75, 0, 1);
     if (bo.tr === 'wipe' && bo.old && rv < 1) { // fire climbs the body from the ground up
       const cut = Math.round(cv.height * (1 - rv));
       ctx.drawImage(bo.old, 0, 0, cv.width, cut, X, Y, W, cut * sc);
       ctx.drawImage(cv, 0, cut, cv.width, cv.height - cut, X, Y + cut * sc, W, (cv.height - cut) * sc);
-      for (let i = 0; i < 24; i++) rect(X + Math.floor(rnd(cv.width)) * sc, Y + (cut - 1 - Math.floor(rnd(3))) * sc, sc, sc, pick(['#ff7a1a', '#ffb03a', '#fff3a8']));
+      for (let i = 0; i < 40; i++) rect(X + Math.floor(rnd(cv.width)) * sc, Y + (cut - 1 - Math.floor(rnd(6))) * sc, Math.max(1, sc), Math.max(1, sc), pick(['#ff7a1a', '#ffb03a', '#fff3a8']));
       return;
     }
     if (bo.tr === 'reasm' && bo.reasm && rv < 1) {
-      for (const [px, py, col, dx, dy, dl] of bo.reasm) { const k = ease(clamp((rv - dl) / (1 - dl), 0, 1)); ctx.fillStyle = col; ctx.fillRect(X + Math.round(px + dx * (1 - k)) * sc, Y + Math.round(py + dy * (1 - k)) * sc, sc, sc); }
+      for (const [px, py, col, dx, dy, dl] of bo.reasm) { const k = ease(clamp((rv - dl) / (1 - dl), 0, 1)); ctx.fillStyle = col; ctx.fillRect(X + Math.round(px + dx * (1 - k)) * sc, Y + Math.round(py + dy * (1 - k)) * sc, sc * 2, sc * 2); }
       return;
     }
     if (bo.tr === 'burst' && rv < .3) cv = tinted(cv, '#ffffff', 1 - rv / .3);
@@ -2412,8 +2504,8 @@ function drawBossBody(f, x, y) {
   if (flash) cv = tinted(cv, '#ffffff');
   else if (f.inv && Math.floor(B.t * 16) % 2) cv = tinted(cv, '#ffffff', .5);
   if (bo.k === 'mirror' && bo.phase >= 3 && !RM) { // glitch: horizontal slices slip sideways
-    const sl = 6;
-    for (let r = 0; r < cv.height; r += sl) { const off = (Math.floor(B.t * 9 + r) % 7 === 0) ? Math.round(rnd(-3, 3)) * sc : 0; ctx.drawImage(cv, 0, r, cv.width, Math.min(sl, cv.height - r), X + off, Y + r * sc, W, Math.min(sl, cv.height - r) * sc); }
+    const sl = 6 * (cv.R || 1);
+    for (let r = 0; r < cv.height; r += sl) { const off = (Math.floor(B.t * 9 + r) % 7 === 0) ? Math.round(rnd(-3, 3)) * SC : 0; ctx.drawImage(cv, 0, r, cv.width, Math.min(sl, cv.height - r), X + off, Y + r * sc, W, Math.min(sl, cv.height - r) * sc); }
   } else ctx.drawImage(cv, X, Y, W, H);
   if (f.wind > 0 && Math.floor(B.t * 14) % 2) { ctx.globalAlpha = .35; ctx.drawImage(tinted(cv, '#ff3a3a'), X, Y, W, H); ctx.globalAlpha = 1; }
   if (bo.k === 'mirror' && bo.phase >= 2) drawShardOrbit(f, x, y, false);
@@ -2572,6 +2664,139 @@ function drawBossOverlay() {
     for (let y = 0; y < VH; y += 2) ctx.drawImage(warpBuf, 0, y, VW, 2, Math.round(Math.sin(y * .06 + B.t * 18) * amp), y, VW, 2);
   }
   if (bo.flash) { const k = bo.flash.t / bo.flash.dur; ctx.globalAlpha = (1 - k) * (RM ? .2 : .75); ctx.fillStyle = bo.flash.col; ctx.fillRect(0, 0, VW, VH); ctx.globalAlpha = 1; }
+}
+// ---- boss sub-form detail painted at fine resolution on top of the base art (HD only) ----
+// every helper here uses design coordinates; P.R fine pixels per design pixel
+function bdOn(P, x, y) { return P.at(Math.floor(x * P.R), Math.floor(y * P.R)); }
+function bdScatter(P, n, seed, x0, y0, x1, y1, mat, fn) { for (let i = 0; i < n; i++) { const x = x0 + hh(i, seed, 1) * (x1 - x0), y = y0 + hh(i, seed, 2) * (y1 - y0); const m = bdOn(P, x, y); if (m && (!mat || mat.includes(m))) fn(x, y, i); } }
+BDETAIL.gobchief = (P, ph, a) => {
+  const b = a.br, R = ph >= 1;
+  // muscle and belly definition, veins, warts
+  P.fline(26, 33 - b, 31, 35 - b, 'skin', .3); P.fline(33, 35 - b, 38, 33 - b, 'skin', .3); P.fline(32, 36 - b, 32, 46 - b, 'skin', .6);
+  for (let i = 0; i < 3; i++) P.fline(27 + i * 2.5, 40 - b + i, 29 + i * 2.5, 41 - b + i, 'skin', .5);
+  bdScatter(P, 60, 3, 14, 4, 52, 58, ['skin'], (x, y, i) => i % 3 ? P.dot(x, y, 'skin', 3.6) : (P.dot(x, y, 'skin', .4), P.dot(x + .25, y, 'skin', .4)));
+  for (const [x0, y0, x1, y1] of [[50, 33, 52, 40], [20, 30, 22, 36], [42, 48, 41, 54]]) P.fline(x0, y0 - b, x1, y1 - b, 'skin', 3.4);
+  // fur mantle of tufts and a trophy-skull necklace
+  for (let i = 0; i < 18; i++) { const x = 16 + i * 1.9, y = 22.5 - b + Math.sin(i * 1.7) * .8; P.line(x, y - 1.6, x + (i % 2 ? .8 : -.8), y + 1.8, .7, 'leather', .2); }
+  for (let i = 0; i < 5; i++) { const x = 22.5 + i * 4.8, y = 27.5 - b + Math.abs(i - 2) * -.6; P.ell(x, y, 1.5, 1.6, 'bone'); P.ell(x - .5, y - .2, .35, .4, 'black'); P.ell(x + .5, y - .2, .35, .4, 'black'); P.fline(x - .6, y + .9, x + .6, y + .9, 'black', 0); }
+  P.fline(20, 26.5 - b, 44, 26.5 - b, 'leather', 1);
+  // belt: pouches, a goblet trophy, studs
+  for (const x of [21, 41]) { P.box(x, 42 - b, 3.6, 4, 'leather'); P.fline(x + .3, 43 - b, x + 3.3, 43 - b, 'leather', 3.4); P.dot(x + 1.8, 44 - b, 'gold', 3.5); }
+  for (let x = 19; x < 46; x += 2.2) P.dot(x, 42 - b, 'steel', 3.6);
+  // face: brow wrinkles, nose holes, ear rings, tusk cracks
+  const hy = 13 - b; for (let i = 0; i < 3; i++) P.fline(26, hy - 4 + i * .9, 38, hy - 4 + i * .9 + (i - 1) * .2, 'skin', 1);
+  P.dot(31, hy + 2.6, 'black', 0); P.dot(33, hy + 2.6, 'black', 0); for (const [x, y] of [[12.5, hy - 1.5], [52.5, hy - 2]]) { P.ell(x, y + 1.6, 1, 1, 'gold'); P.dot(x, y + 1.6, 'black', 0); }
+  P.fline(26.4, hy + 6, 26.8, hy + 3.4, 'bone', 1); P.fline(37.6, hy + 6, 37.9, hy + 3.4, 'bone', 1);
+  if (!R) { bdScatter(P, 40, 7, 18, 18, 47, 41, ['iron'], (x, y) => P.dot(x, y, 'iron', 3.8)); P.fline(20, 30 - b, 44, 30 - b, 'iron', .6); P.fline(21, 34 - b, 43, 34 - b, 'iron', .6); }
+  else { bdScatter(P, 22, 9, 18, 18, 46, 44, ['skin'], (x, y, i) => P.fline(x, y, x + 1.6, y + 1.2 * (i % 2 ? 1 : -1), 'red', 2.6)); P.ell(32, hy - 1, 1, .8, 'eyeR'); }
+};
+BDETAIL.treant = (P, ph, a) => {
+  const b = a.br, burn = ph >= 2;
+  // bark plates and knots, then fused bark faces like souls caught in the wood
+  bdScatter(P, 120, 11, 13, 22, 51, 58, ['bark'], (x, y, i) => i % 2 ? P.fline(x, y, x + .2, y + 2.2, 'bark', 0) : P.dot(x, y, 'bark', 3.6));
+  const faces = [[21, 47, 2.2], [43, 44, 2], [29, 53, 1.7], [38, 51, 1.6], [16.5, 38, 1.5], [47, 34, 1.5]];
+  for (const [x, y, r] of faces) if (bdOn(P, x, y - b)) P.face(x, y - b, r, 'bark', burn ? 'ember' : ph ? 'eyeG' : 'black', .8);
+  // mushrooms + hanging moss and vines
+  if (!burn) { for (const [x, y, s] of [[15, 52, 1], [17, 54, .8], [47, 50, 1.1], [49, 53, .7], [24, 24, .7]]) { P.line(x, y - b, x, y + 1.6 * s - b, .35 * s, 'bone', .35 * s); P.ell(x, y - b, 1.6 * s, .9 * s, ph ? 'eyeG' : 'red'); P.dot(x - .5 * s, y - .3 - b, 'white', 3); }
+    for (let i = 0; i < 9; i++) { const x = 17 + i * 3.6, L = 3 + (i * 7 % 5); for (let j = 0; j < L * 3; j++) P.dot(x + Math.sin(j * .6 + i) * .35, 25 - b + j / 3, 'moss', 2 + (j % 3 ? 0 : 1.4)); } }
+  for (let i = 0; i < 3; i++) { let px = 14 + i * 13, py = 56; for (let j = 0; j < 9; j++) { const nx = px + Math.sin(j * .9 + i) * 1.8, ny = py - 3.4; P.line(px, py - b * (j / 9), nx, ny - b * (j / 9), .45, burn ? 'ember' : 'leaf', .4); px = nx; py = ny; } }
+  if (ph === 0) bdScatter(P, 160, 13, 8, -6, 56, 24, ['leaf'], (x, y, i) => { P.line(x, y, x + .8, y + .7, .55, i % 4 ? 'leaf' : 'moss', .2); });
+  if (burn) { bdScatter(P, 70, 17, 12, 20, 52, 58, ['bark'], (x, y) => P.dot(x, y, 'ember', 3)); for (let i = 0; i < 6; i++) P.glowc(18 + i * 5.6, 31 + (i % 2) * 13 - b, .9, 'fire'); }
+  // the heart: a glowing sap core behind the mouth
+  P.glowc(32, 44 - b, 1.3, burn ? 'fire' : ph ? 'eyeG' : 'eyeY');
+};
+BDETAIL.darkknight = (P, ph, a) => {
+  const b = a.br, cr = ph >= 1, W = ph >= 2;
+  // plate seams, rivets and gold filigree
+  for (const y of [24, 29, 34]) P.fline(21, y - b, 43, y - b, 'iron', .4);
+  bdScatter(P, 46, 21, 16, 2, 50, 62, ['iron'], (x, y) => { P.dot(x, y, 'steel', 4); P.dot(x + .25, y + .25, 'iron', 0); });
+  for (let i = 0; i < 9; i++) { const t = i / 8, x = 22 + t * 20, y = 21 - b + Math.sin(t * Math.PI) * 2.6; P.dot(x, y, 'gold', 3.4); P.dot(x, y + .25, 'gold', 1.8); }
+  for (const s of [-1, 1]) for (let i = 0; i < 6; i++) P.dot(32 + s * (2 + i * .9), 37 - b - i * .55, 'gold', 3);
+  // chainmail between plates
+  for (let y = 40; y < 45; y += .5) for (let x = 20; x < 44; x += .5) if (((x * 2 + y * 2) | 0) % 2 === 0 && bdOn(P, x, y - b) === 'iron') P.dot(x, y - b, 'dark', 2.4);
+  // visor slits glow, helm engraving, pauldron spikes
+  P.fline(25.5, 10.25 - b, 38.5, 10.25 - b, W ? 'dflame' : 'eyeR', 2.5); for (let x = 26; x < 39; x += 2) P.fline(x, 12 - b, x, 15 - b, 'black', 0);
+  P.fline(32, 1 - b, 32, 7 - b, 'steel', 3.6); for (const [x, y, an] of [[13, 17, -2.2], [16, 15, -1.8], [44, 15, -1.3], [49, 16, -.9]]) P.spike(x, y - b, an, cr ? 4.5 : 3, .9, W ? 'dark' : 'steel');
+  // sword runes
+  const sa = swing(a, 1.95, -2.0, 2.9), [hx, hy] = pol(18, 22 - b, sa, 12), wa = swing(a, 1.75, -.45, 2.35);
+  for (let k = 0; k < 6; k++) { const [x, y] = pol(hx, hy, wa, 9 + k * 3.6); P.glowc(x, y, .32, W ? 'void' : cr ? 'eyeR' : 'glass'); }
+  // tattered cape holes and skulls on the belt
+  if (!W) bdScatter(P, 14, 23, 14, 30, 50, 60, ['cloth'], (x, y) => P.ell(x, y, .7, .5, 'black', { flat: 0 }));
+  for (const x of [23, 41]) { P.ell(x, 39.6 - b, 1.2, 1.2, 'bone'); P.dot(x - .4, 39.4 - b, 'black', 0); P.dot(x + .4, 39.4 - b, 'black', 0); }
+  if (cr) bdScatter(P, 30, 27, 18, 18, 46, 46, ['iron'], (x, y, i) => P.fline(x, y, x + (i % 2 ? 1.4 : -1.4), y + 1.1, W ? 'dflame' : 'eyeR', 2.4));
+  P.glowc(32, 27 - b, W ? 2.2 : 1.4, W ? 'dflame' : 'eyeR');
+};
+BDETAIL.mirror = (P, ph, a) => {
+  const b = a.br;
+  if (ph <= 1) { // carved frame: faces, gems, filigree; the glass carries reflections
+    for (let i = 0; i < 10; i++) { const y = 16 + i * 4; P.face(13, y, 1.1, 'gold', 'black', .6); P.face(51, y + 2, 1.1, 'gold', 'black', .6); }
+    for (let i = 0; i < 11; i++) { const an = Math.PI + i / 10 * Math.PI, [x, y] = pol(32, 13, an, 19.5); P.glowc(x, y, .45, i % 2 ? 'purple' : 'void'); }
+    bdScatter(P, 30, 31, 15, 6, 49, 55, ['glass'], (x, y, i) => P.fline(x, y, x + 2.4, y - 2.4, 'shine', i % 3 ? 1.6 : 3));
+    P.glowc(32, 2, 1.5, ph ? 'void' : 'eyeR');
+    return;
+  }
+  const D = ph >= 3;
+  // the reflection grows a fused crown of faces and crystal: bone spikes, many eyes, a burning core eye
+  for (let i = 0; i < 7; i++) { const an = -Math.PI / 2 + (i - 3) * .32, [x, y] = pol(32, 14, an, 6); P.spike(x, y, an, D ? 9 : 6, 1.1, i % 2 ? 'glass' : 'bone'); }
+  for (const [x, y, r] of [[25, 28, 2], [39, 26, 1.8], [22, 38, 1.6], [42, 37, 1.6], [32, 45, 1.4]]) P.face(x, y, r, 'black', D ? 'void' : 'eyeR', 1);
+  bdScatter(P, 50, 37, 16, 14, 48, 62, ['black'], (x, y, i) => i % 4 ? P.dot(x, y, 'dark', 3) : P.glowc(x, y, .35, D ? 'void' : 'eyeR'));
+  P.ell(32, 33, 4.2, 4.2, 'iron'); P.ell(32, 33, 3.2, 3.2, 'black'); P.glowc(32, 33, 2.6, 'eyeO'); for (let i = 0; i < 6; i++) { const [x, y] = pol(32, 33, i / 6 * Math.PI * 2, 2.2); P.dot(x, y, 'ember', 1); }
+  bdScatter(P, 40, 41, 0, 0, 64, 64, ['glass'], (x, y, i) => { P.dot(x, y, 'shine', 3); if (i % 5 === 0) P.glowc(x, y, .5, 'cyan'); });
+};
+// ---- giant out-of-box swings and per-act terrain that transforms on breakout and each phase ----
+const GIANT = { // per boss: weapon look per phase [shaft, head, glow]
+  gobchief: [['#5a3216', '#8a8a96', '#d8d8e0'], ['#5a3216', '#ff7a1a', '#fff3a8']],
+  treant: [['#4a3220', '#62a038', '#b0ff7a'], ['#3a2618', '#cfc6aa', '#b0ff7a'], ['#1a1210', '#ff7a1a', '#ffd060']],
+  darkknight: [['#7a7a86', '#e4ecf6', '#ffffff'], ['#5a5a66', '#ff4a5a', '#ffd0d0'], ['#16061e', '#8a2ad0', '#e6a8ff']],
+  mirror: [['#d8b04a', '#9fe6f4', '#ffffff'], ['#d8b04a', '#b480ff', '#ffffff'], ['#1a1420', '#9fe6f4', '#ffffff'], ['#1a1420', '#d07aff', '#ffffff']] };
+function giantSwing(f, targets) { // queued by bossAttackFx when the boss fights from outside
+  const bo = B.boss, [bcx, bcy] = foeCenter(f), u = targets[0] || B.units[0]; if (!u) return;
+  const n = bo.k === 'mirror' && bo.phase >= 3 ? 3 : 1;
+  for (let i = 0; i < n; i++) B.fx.push({ type: 'giant', t: -i * .09, dur: .5, px: bcx, py: bcy - 20, tx: u.x, ty: u.y - 16, k: bo.k, ph: bo.phase, i, done: 0 });
+}
+function drawGiant(e) {
+  if (e.t < 0) return; const p = clamp(e.t / e.dur, 0, 1), C = (GIANT[e.k] || GIANT.darkknight)[Math.min(e.ph, (GIANT[e.k] || []).length - 1)] || GIANT.darkknight[0];
+  const dx = e.tx - e.px, dy = e.ty - e.py, L = Math.hypot(dx, dy) + 70, mid = Math.atan2(dy, dx), side = e.px > 160 ? 1 : -1;
+  const sweep = RM ? 0 : 1.05, k = p < .55 ? ease(p / .55) : 1, an = mid - side * sweep * (1 - 2 * k) * .6 + e.i * .22 * side;
+  const al = p < .8 ? 1 : (1 - p) / .2; ctx.globalAlpha = al * (p > .55 ? .75 : 1);
+  const W = e.k === 'treant' ? 16 : e.k === 'gobchief' ? 12 : 9;
+  // motion smear behind the blade
+  if (!RM && p < .6) for (let s = 1; s <= 3; s++) { const a2 = an + side * s * .09; ctx.globalAlpha = al * (.22 / s); for (let d = L * .35; d < L; d += 4) rect(e.px + Math.cos(a2) * d - W / 2, e.py + Math.sin(a2) * d - W / 2, W, W, C[2]); }
+  ctx.globalAlpha = al;
+  for (let d = 0; d < L; d += 3) { // shaft then a heavy head on the last third
+    const x = e.px + Math.cos(an) * d, y = e.py + Math.sin(an) * d, head = d > L * .62, w = head ? W + (e.k === 'gobchief' ? 8 : 2) : Math.max(5, W * .55);
+    rect(x - w / 2 - 1, y - w / 2 - 1, w + 2, w + 2, '#0a0810'); rect(x - w / 2, y - w / 2, w, w, head ? C[1] : C[0]); rect(x - w / 2, y - w / 2, Math.max(2, w * .4), Math.max(2, w * .4), lighten(head ? C[1] : C[0], .3));
+    if (head && (d / 3) % 4 < 1) { const nx = -Math.sin(an), ny = Math.cos(an); for (const sg of [-1, 1]) rect(x + nx * sg * (w / 2 + 3) - 2, y + ny * sg * (w / 2 + 3) - 2, 4, 4, e.k === 'treant' ? C[0] : '#d8d8e0'); }
+  }
+  const hx = e.px + Math.cos(an) * L, hy = e.py + Math.sin(an) * L; ctx.globalAlpha = al * .5; rect(hx - 12, hy - 12, 24, 24, C[2]); ctx.globalAlpha = 1;
+  if (p >= .55 && !e.done) { e.done = 1; quake(RM ? 3 : 10); if (!RM) B.impact = Math.max(B.impact || 0, .08); SFX.land && SFX.land();
+    for (let i = 0; i < (RM ? 8 : 30); i++) B.parts.push({ x: e.tx + rnd(-14, 14), y: e.ty + 14, vx: rnd(-150, 150), vy: rnd(-220, -60), t: 0, life: rnd(.4, .9), col: i % 3 ? C[1] : '#3a2a1a', s: i % 2 ? 3 : 2, g: 420 }); }
+}
+// wind-up telegraph: a pulsing danger lane from the looming boss to the hero
+function drawGiantTell() {
+  const bo = B.boss; if (!bo || !bo.outside || bo.st !== 'fight') return; const f = bo.f; if (!(f.wind > 0)) return;
+  const u = B.units.find(x => x.hp > 0); if (!u) return; const [bcx, bcy] = foeCenter(f), on = RM ? 1 : Math.floor(B.t * 12) % 2;
+  ctx.globalAlpha = on ? .28 : .14; for (let d = 0, L = Math.hypot(u.x - bcx, u.y - 16 - bcy); d < L; d += 6) { const q = d / L; rect(bcx + (u.x - bcx) * q - 5, bcy + (u.y - 16 - bcy) * q - 5, 10, 10, '#ff3a3a'); }
+  ctx.globalAlpha = 1; rect(u.x - 14, u.y + 2, 28, 2, on ? '#ff5a5a' : '#7a2020');
+}
+// terrain: level grows with each phase (and the breakout); eases in over a second, instant under reduced motion
+function terrLevel(bo) { return bo ? Math.max(bo.phase, bo.outside ? 1 : 0) : 0; }
+function drawTerrain() {
+  const bo = B.boss; if (!bo) return; const L = terrLevel(bo); if (!L) return;
+  if (bo.terrL !== L) { bo.terrL = L; bo.terrT = 0; } bo.terrT = Math.min(1, (bo.terrT || 0) + (RM ? 1 : 1 / 60 / 1.2));
+  const k = ease(bo.terrT), act = B.act, t = RM ? 0 : B.t, gy = 248, x0 = -OX, x1 = VW - OX;
+  const flood = (h, c1, c2, c3) => { const top = gy + 30 - h * k; for (let x = Math.floor(x0 / 4) * 4; x < x1; x += 4) { const w = Math.round(Math.sin(x * .05 + t * 2) * 2); rect(x, top + w, 4, VH, c1); rect(x, top + w, 4, 2, c3); if ((x / 4 + Math.floor(t * 6)) % 7 === 0) rect(x, top + w + 4, 2, 2, c2); } };
+  const cracks = (n, col, glow) => { for (let i = 0; i < n; i++) { let x = hh(i, 7, 1) * LW, y = 150 + hh(i, 7, 2) * 95; const m = Math.floor(10 * k); for (let s = 0; s < m; s++) { const nx = x + (hh(i, s, 3) - .5) * 14, ny = y + hh(i, s, 4) * 5; for (let q = 0; q < 1; q += .2) rect(x + (nx - x) * q, y + (ny - y) * q, 2, 1, col); if (glow && s % 3 === 0) { ctx.globalAlpha = .35 + Math.sin(t * 4 + i) * .15; rect(nx - 2, ny - 1, 4, 3, glow); ctx.globalAlpha = 1; } x = nx; y = ny; } } };
+  const rocks = (n, c1, c2, rise) => { for (let i = 0; i < n; i++) { const x = (i % 2 ? hh(i, 9, 1) * 60 : LW - hh(i, 9, 1) * 60) + (i % 2 ? -OX * .6 : OX * .6), h = (18 + hh(i, 9, 2) * 40) * k, bob = rise ? Math.sin(t * 1.5 + i) * 4 : 0, y = rise ? 150 - hh(i, 9, 3) * 90 + bob : gy;
+      rect(x - 7, y - h, 14, h, c1); rect(x - 7, y - h, 5, h, c2); rect(x - 5, y - h - 3, 10, 3, c2); if (rise) { rect(x - 4, y, 8, 4, c1); rect(x - 1, y + 4, 2, 3, c1); } } };
+  if (act === 0) { cracks(6 + L * 3, '#1a0a04', '#ff7a1a'); rocks(L * 3, '#4a3a2a', '#6a5a44', false); if (L >= 2) flood(10, '#a02408', '#fff3a8', '#ffb03a'); }
+  else if (act === 1) { cracks(6 + L * 2, '#1a1008', L >= 2 ? '#ff7a1a' : '#62a038'); for (let i = 0; i < L * 5; i++) { const x = hh(i, 5, 1) * LW, h = (8 + hh(i, 5, 2) * 16) * k; rect(x, gy - h, 3, h, '#36261a'); rect(x + 1, gy - h - 2, 1, 2, '#cfc6aa'); }
+    if (L >= 2) { flood(14, '#c0300c', '#ffd060', '#ff7a1a'); for (let i = 0; i < 14; i++) { const y = gy - ((t * 30 + i * 23) % 160); rect(hh(i, 3, 1) * LW, y, 2, 2, '#ffb03a'); } } }
+  else if (act === 2) { cracks(8 + L * 3, '#0a0a10', L >= 2 ? '#8a2ad0' : null); rocks(L * 2, '#3a3a46', '#5a5a66', false);
+    for (let i = 0; i < L * 6; i++) { const x = hh(i, 4, 1) * LW, fall = ((t * 60 + i * 41) % 260) - 20; rect(x, fall, 4, 4, '#4a4a56'); rect(x, fall, 2, 2, '#6a6a76'); }
+    if (L >= 2) flood(12, '#16304a', '#9fe6f4', '#2886a6'); }
+  else { ctx.globalAlpha = .5 * k; for (let i = -6; i < 12; i++) { const x = i * 40 + Math.sin(t * .7) * 10; for (let y = 120; y < gy; y += 3) rect(x + (y - 120) * .4, y, 1, 1, '#8a2ad0'); } ctx.globalAlpha = 1;
+    rocks(L * 3, '#1a1420', '#3c0e52', true); if (L >= 2) flood(8 + L * 4, '#16061e', '#e6a8ff', '#8a2ad0'); }
 }
 // ---- Ultimate Forms: level 15+ heroes with a tier-3 evolution charge a meter by dealing damage, then transform (K / ULT button) ----
 const ULT_LV = 15, ULT_DUR = 7, ULT_FILL = 30; // meter = 30 base hits of damage
@@ -3286,10 +3511,12 @@ function drawBattle() {
   ctx.save();
   const sk = B.shake * (RM ? .25 : 1); if (sk > 0) ctx.translate(Math.round(rnd(-sk, sk)), Math.round(rnd(-sk, sk)));
   if (B.zoom && !RM) { const z = B.zoom, s = 1 + z.a * Math.sin(Math.PI * z.t / z.dur); ctx.translate(z.x, z.y); ctx.scale(s, s); ctx.translate(-z.x, -z.y); }
-  const ents = [...B.units.map((u, i) => ({ y: u.y, d: () => drawUnit(u, i) })), ...B.foes.map((f, i) => ({ y: f.y, d: () => drawFoe(f, i) }))];
+  const ents = [...B.units.map((u, i) => ({ y: u.y, d: () => drawUnit(u, i) })), ...B.foes.map((f, i) => ({ y: B.boss && B.boss.f === f && B.boss.outside ? -1e9 : f.y, d: () => drawFoe(f, i) }))];
+  drawTerrain();
   ents.sort((a, b) => a.y - b.y).forEach(e => e.d());
   for (const p of B.proj) drawProj(p);
   for (const e of B.eproj) drawEProj(e);
+  drawGiantTell();
   for (const e of B.fx) drawFx(e);
   if (B.impact > 0 && !RM) { ctx.globalAlpha = .35; rect(-200, -200, LW + 400, AH + 400, '#ffffff'); ctx.globalAlpha = 1; }
   for (const p of B.parts) { ctx.globalAlpha = clamp(1 - p.t / p.life + .3, 0, 1); rect(p.x, p.y, p.s, p.s, p.col); }
@@ -3370,7 +3597,8 @@ function drawFoe(f, i) {
     const bw = 46, byy = f.y - 228;
     if (B.boss.st === 'fight') { bar(f.x - bw / 2 - 20, f.y + 6, bw, 2, f.wind > 0 ? 1 : 1 - f.timer / f.per, f.wind > 0 ? '#ffffff' : '#7a3a3a', '#16161c'); if (f.wind > 0) T('!', f.x - 20 - bw / 2 - 8, f.y + 2, COL.red, 1, 'c', '#000'); }
     if (f.burnT > 0) rect(f.x + 8, f.y + 6, 3, 3, '#ff9a3a'); if (f.chill > 0) rect(f.x + 14, f.y + 6, 3, 3, '#9fe6f4');
-    hit(f.x - BW * f.sc * .45, f.y - BH * f.sc, BW * f.sc * .9, BH * f.sc + 4, () => { B.target = i; onJ(); });
+    if (B.boss.outside) { if (f.x > LW) hit(LW + 2, -OY, VW, VH, () => { B.target = i; onJ(); }); else if (f.x < 0) hit(-OX, -OY, OX - 2, VH, () => { B.target = i; onJ(); }); }
+    else hit(f.x - BW * f.sc * .45, f.y - BH * f.sc, BW * f.sc * .9, BH * f.sc + 4, () => { B.target = i; onJ(); });
     return;
   }
   if (f.wind > 0 && !RM && Math.floor(B.t * 30) % 3 === 0) { const [cx, cy] = foeCenter(f), an = rnd(Math.PI * 2); B.parts.push({ x: cx + Math.cos(an) * 26, y: cy + Math.sin(an) * 26, vx: -Math.cos(an) * 90, vy: -Math.sin(an) * 90, t: 0, life: .28, col: '#ff5a5a', s: 1, g: 0 }); }
@@ -3411,7 +3639,7 @@ function drawFx(e) {
     const a = 1 - p; ctx.globalAlpha = a; rect(e.x - 6, 0, 12, e.y, '#ffe070'); rect(e.x - 2, 0, 4, e.y, '#ffffff'); ctx.globalAlpha = 1;
   } else if (e.type === 'nova') {
     const s = Math.round(8 + p * 90); ctx.globalAlpha = 1 - p; frame(e.x - s, e.y - s * .6, s * 2, s * 1.2, e.col); frame(e.x - s + 3, e.y - s * .6 + 3, s * 2 - 6, s * 1.2 - 6, '#ffffff'); ctx.globalAlpha = 1;
-  } else if (['shock', 'rock', 'roots', 'arc', 'wave', 'shard', 'reach'].includes(e.type)) { drawBossFx(e);
+  } else if (['shock', 'rock', 'roots', 'arc', 'wave', 'shard', 'reach', 'giant'].includes(e.type)) { drawBossFx(e);
   } else if (e.type === 'ring') {
     const s = Math.round(4 + p * 22); ctx.globalAlpha = 1 - p; frame(e.x - s, e.y - s, s * 2, s * 2, e.col); ctx.globalAlpha = 1;
   } else if (e.type === 'drop') {

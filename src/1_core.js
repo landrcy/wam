@@ -24,6 +24,13 @@ function resize() {
 addEventListener('resize', resize); resize();
 
 // ---------- tuning knobs (tweak here) ----------
+// per-path balance: d = damage, b = extra vs bosses / a lone foe, s = splash to two other foes, t = damage taken
+const PATHBAL = { archer: { t: .72 }, mage: { t: .75 },
+  bastion: { d: 1.2 }, sunknight: { t: .85 }, seraph: { d: 1.1, s: .2 }, reaper: { s: .25 },
+  wildlord: { d: 1.25, b: 1.1 }, packleader: { d: 1.15, t: .9 }, tempest: { b: 1.35 }, skyhunter: { d: 1.1 }, nightstalker: { d: 1.15, t: .85, s: .2 }, phantom: { d: 1.1, s: .25, t: .9 }, marksman: { s: .3 }, hawkeye: { s: .3, t: .88 },
+  hellcaller: { d: 1.4, t: .75 }, cinderlord: { d: 1.3, t: .7 }, sunflare: { d: 1.25, t: .9 }, ashborn: { d: 1.45, s: .2 }, glacier: { d: 1.5, b: 1.15, s: .2 }, blizzard: { d: 1.45, b: 1.35, t: .9 }, timeweaver: { d: 1.8, b: 1.1, s: .25 }, voidwalker: { d: 1.5, b: 1.2, s: .25 } };
+function pathBal() { const o = { d: 1, b: 1, s: 0, t: 1 }, h = save && save.chars && save.chars[save.cls]; if (!h) return o; const ch = [save.cls]; let k = h.evo; while (k && typeof EVO !== 'undefined' && EVO[k]) { ch.push(k); k = EVO[k].from; }
+  for (const c of ch) { const v = PATHBAL[c]; if (v) for (const x in v) o[x] = x === 's' ? Math.max(o.s, v.s) : o[x] * v[x]; } return o; }
 const TUNE = {
   markerSpeed: 1.12,      // timing-bar sweeps per second (base)
   goodZone: 0.19,         // width of the GOOD zone (fraction of bar)

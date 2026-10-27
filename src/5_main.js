@@ -5,10 +5,12 @@ function drawBattle() {
   ctx.save();
   const sk = B.shake * (RM ? .25 : 1); if (sk > 0) ctx.translate(Math.round(rnd(-sk, sk)), Math.round(rnd(-sk, sk)));
   if (B.zoom && !RM) { const z = B.zoom, s = 1 + z.a * Math.sin(Math.PI * z.t / z.dur); ctx.translate(z.x, z.y); ctx.scale(s, s); ctx.translate(-z.x, -z.y); }
-  const ents = [...B.units.map((u, i) => ({ y: u.y, d: () => drawUnit(u, i) })), ...B.foes.map((f, i) => ({ y: f.y, d: () => drawFoe(f, i) }))];
+  const ents = [...B.units.map((u, i) => ({ y: u.y, d: () => drawUnit(u, i) })), ...B.foes.map((f, i) => ({ y: B.boss && B.boss.f === f && B.boss.outside ? -1e9 : f.y, d: () => drawFoe(f, i) }))];
+  drawTerrain();
   ents.sort((a, b) => a.y - b.y).forEach(e => e.d());
   for (const p of B.proj) drawProj(p);
   for (const e of B.eproj) drawEProj(e);
+  drawGiantTell();
   for (const e of B.fx) drawFx(e);
   if (B.impact > 0 && !RM) { ctx.globalAlpha = .35; rect(-200, -200, LW + 400, AH + 400, '#ffffff'); ctx.globalAlpha = 1; }
   for (const p of B.parts) { ctx.globalAlpha = clamp(1 - p.t / p.life + .3, 0, 1); rect(p.x, p.y, p.s, p.s, p.col); }
@@ -89,7 +91,8 @@ function drawFoe(f, i) {
     const bw = 46, byy = f.y - 228;
     if (B.boss.st === 'fight') { bar(f.x - bw / 2 - 20, f.y + 6, bw, 2, f.wind > 0 ? 1 : 1 - f.timer / f.per, f.wind > 0 ? '#ffffff' : '#7a3a3a', '#16161c'); if (f.wind > 0) T('!', f.x - 20 - bw / 2 - 8, f.y + 2, COL.red, 1, 'c', '#000'); }
     if (f.burnT > 0) rect(f.x + 8, f.y + 6, 3, 3, '#ff9a3a'); if (f.chill > 0) rect(f.x + 14, f.y + 6, 3, 3, '#9fe6f4');
-    hit(f.x - BW * f.sc * .45, f.y - BH * f.sc, BW * f.sc * .9, BH * f.sc + 4, () => { B.target = i; onJ(); });
+    if (B.boss.outside) { if (f.x > LW) hit(LW + 2, -OY, VW, VH, () => { B.target = i; onJ(); }); else if (f.x < 0) hit(-OX, -OY, OX - 2, VH, () => { B.target = i; onJ(); }); }
+    else hit(f.x - BW * f.sc * .45, f.y - BH * f.sc, BW * f.sc * .9, BH * f.sc + 4, () => { B.target = i; onJ(); });
     return;
   }
   if (f.wind > 0 && !RM && Math.floor(B.t * 30) % 3 === 0) { const [cx, cy] = foeCenter(f), an = rnd(Math.PI * 2); B.parts.push({ x: cx + Math.cos(an) * 26, y: cy + Math.sin(an) * 26, vx: -Math.cos(an) * 90, vy: -Math.sin(an) * 90, t: 0, life: .28, col: '#ff5a5a', s: 1, g: 0 }); }
@@ -130,7 +133,7 @@ function drawFx(e) {
     const a = 1 - p; ctx.globalAlpha = a; rect(e.x - 6, 0, 12, e.y, '#ffe070'); rect(e.x - 2, 0, 4, e.y, '#ffffff'); ctx.globalAlpha = 1;
   } else if (e.type === 'nova') {
     const s = Math.round(8 + p * 90); ctx.globalAlpha = 1 - p; frame(e.x - s, e.y - s * .6, s * 2, s * 1.2, e.col); frame(e.x - s + 3, e.y - s * .6 + 3, s * 2 - 6, s * 1.2 - 6, '#ffffff'); ctx.globalAlpha = 1;
-  } else if (['shock', 'rock', 'roots', 'arc', 'wave', 'shard', 'reach'].includes(e.type)) { drawBossFx(e);
+  } else if (['shock', 'rock', 'roots', 'arc', 'wave', 'shard', 'reach', 'giant'].includes(e.type)) { drawBossFx(e);
   } else if (e.type === 'ring') {
     const s = Math.round(4 + p * 22); ctx.globalAlpha = 1 - p; frame(e.x - s, e.y - s, s * 2, s * 2, e.col); ctx.globalAlpha = 1;
   } else if (e.type === 'drop') {

@@ -148,7 +148,7 @@ function attack(u, q, manual) {
   u.lt = .16;
   if (q === 'miss') {
     SFX.miss(); num(...foeCenter(f), 'miss', COL.dim);
-    if (f.T.mirror) { const h = Math.round(f.max * .06); f.hp = Math.min(f.max, f.hp + h); num(foeCenter(f)[0], foeCenter(f)[1] - 12, '+' + h, COL.green); }
+    if (f.T.mirror) { const hl = (save.chars[save.cls] || {}).lvl || 1, h = Math.round(f.max * .06 * clamp(1 - (hl - 15) * .05, .2, 1) * (save.cls === 'warrior' ? 1 : .6)); f.hp = Math.min(f.max, f.hp + h); num(foeCenter(f)[0], foeCenter(f)[1] - 12, '+' + h, COL.green); }
     return;
   }
   let dmg = u.s.dmg * (q === 'perfect' ? u.s.perfMult : 1);
@@ -158,12 +158,13 @@ function attack(u, q, manual) {
   if (grp === 'm') { u.dash = { t: 0, dur: mv === 'blink' ? .18 : manual ? .26 : .22, tx: fx0 - 34 - u.x, ty: f.y - u.y, blink: mv === 'blink' }; dust(u.x, u.y, 5); }
   else if (grp === 'r') u.kb = manual ? (mv === 'snipe' ? 8 : 5) : 3; else u.cast = .25;
   if (B.buff.dmg > 0) dmg *= 1.25;
-  dmg *= ultDmgMul();
+  dmg *= ultDmgMul(); const PB = pathBal(); dmg *= PB.d * (f.T.boss || liveFoes().length === 1 ? PB.b : 1);
   if (manual && unitBar(u) === 'rage') dmg *= 1 + Math.min(.3, B.combo * .02);
   if (u.s.rage) dmg *= 1 + Math.min(.4, (1 - u.hp / u.max) * .6);
   if (u.s.surge && manual && B.streak >= 5) dmg *= 1 + u.s.surge;
   const crit = Math.random() * 100 < u.s.crit; if (crit) dmg *= u.s.critDmg;
   const info = { q, crit, manual };
+  if (PB.s && manual) liveFoes().filter(o => o !== f).slice(0, 2).forEach(o => hitFoe(o, dmg * PB.s, { q: 'splash' }, u));
   if (manual && q === 'perfect') {
     B.hitstop = .055; B.shake = Math.max(B.shake, 3);
     if (f.wind > 0 || f.pend) {
@@ -312,7 +313,7 @@ function foeHit(f) {
     let d = f.dmg * rnd(.9, 1.1) * (P.slam ? .7 : 1) * 30 / (30 + u.s.arm);
     if (P.dodge) { d *= .4; u.hop = .32; num(u.x - 10, u.y - 64, 'dodge', COL.green); }
     if (u.guard) { d *= .5; u.guard = 0; num(u.x, u.y - 64, 'guard', COL.blue); }
-    d = Math.max(1, Math.round(d)); d = Math.round(ultTaken(d, u)); if (ADM.god) d = 0; u.hp -= d;
+    d = Math.max(1, Math.round(d)); d = Math.round(ultTaken(d * pathBal().t, u)); if (ADM.god) d = 0; u.hp -= d;
     if (u.s.thorns && !f.dead) hitFoe(f, d * u.s.thorns * 2, { q: 'splash' }, u); u.hurt = .22; u.kb = Math.max(u.kb, P.dodge ? 2 : 7);
     num(u.x + rnd(-5, 5), u.y - 54, '-' + d, COL.red, d > u.max * .2 ? 2 : 1);
     for (let i = 0; i < 8; i++) spark(u.x, u.y - 24, i % 2 ? '#ff5a5a' : '#ffffff', 100);

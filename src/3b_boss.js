@@ -236,12 +236,13 @@ function artMirror(P, ph, a) {
   if (D) for (const [x, y] of [[-10, 28], [6, 22], [11, 36], [-4, 40]]) P.line(r.X(x), r.Y(y), r.X(x + 4), r.Y(y - 5), .5, 'void', .5);
 }
 const BOSSART = { gobchief: artGob, treant: artTreant, darkknight: artKnight, mirror: artMirror };
-const bfCache = new Map();
+const bfCache = new Map(), BHD = 4; // bosses are painted 4x finer than their design grid
+const BDETAIL = {};
 function bossFrame(k, ph, a) {
   const key = k + ph + '|' + a.br + a.wu + a.at + a.fl + a.sp; let c = bfCache.get(key); if (c) return c;
-  const P = new Pix(BW, BH, BOX, BOY);
-  BOSSART[k](P, ph, { br: a.br, wu: a.wu / 4, at: a.at / 6, fl: a.fl, sp: a.sp / 6 });
-  c = P.bake(); if (bfCache.size > 600) bfCache.clear(); bfCache.set(key, c); return c;
+  const P = new HD(BW, BH, BOX, BOY, BHD);
+  const A = { br: a.br, wu: a.wu / 4, at: a.at / 6, fl: a.fl, sp: a.sp / 6 }; BOSSART[k](P, ph, A);
+  if (BDETAIL[k]) BDETAIL[k](P, ph, A); c = P.bake(); if (bfCache.size > 90) bfCache.delete(bfCache.keys().next().value); bfCache.set(key, c); return c;
 }
 const bossPat = () => B && B.boss && B.boss.st !== 'outro' && B.boss.st !== 'done' ? BOSS[B.boss.k].pats[B.boss.phase] : null;
 function bossFlash(col, dur = .35) { if (B.boss) B.boss.flash = { col, t: 0, dur }; }
@@ -286,9 +287,9 @@ function bossStart(f) {
 // sample the visible pixels of a boss frame into flying particles (transforms, death)
 function bossBits(cv, x0, y0, n, sp, life) {
   const g = cv.getContext('2d'), d = g.getImageData(0, 0, cv.width, cv.height).data, pts = [];
-  for (let y = 0; y < cv.height; y += 2) for (let x = 0; x < cv.width; x += 2) { const i = (y * cv.width + x) * 4; if (d[i + 3] > 200) pts.push([x, y, '#' + [d[i], d[i + 1], d[i + 2]].map(v => v.toString(16).padStart(2, '0')).join('')]); }
+  for (let y = 0; y < cv.height; y += 2 * (cv.R || 1)) for (let x = 0; x < cv.width; x += 2 * (cv.R || 1)) { const i = (y * cv.width + x) * 4; if (d[i + 3] > 200) pts.push([x, y, '#' + [d[i], d[i + 1], d[i + 2]].map(v => v.toString(16).padStart(2, '0')).join('')]); }
   for (let k = 0; k < n && pts.length; k++) {
-    const [x, y, col] = pts[Math.floor(Math.random() * pts.length)], S = (B.boss && B.boss.f.sc) || PSC, px = x0 + x * S, py = y0 + y * S, cx = x0 + cv.width * S / 2, cy = y0 + cv.height * S * .6;
+    const [x, y, col] = pts[Math.floor(Math.random() * pts.length)], S = ((B.boss && B.boss.f.sc) || PSC) / (cv.R || 1), px = x0 + x * S, py = y0 + y * S, cx = x0 + cv.width * S / 2, cy = y0 + cv.height * S * .6;
     const an = Math.atan2(py - cy, px - cx) + rnd(-.4, .4), v = rnd(.3, 1) * sp;
     B.parts.push({ x: px, y: py, vx: Math.cos(an) * v, vy: Math.sin(an) * v - 40, t: 0, life: rnd(.5, 1) * life, col, s: S, g: 220 });
   }
@@ -324,8 +325,9 @@ function bossShatter(f) {
 // where the boss fights from once it has broken out: beside the box on wide screens, looming above it on tall ones
 function bossOutPos(bo) {
   const side = bo.side || 1;
-  if (OX >= 150) { const sc = clamp(Math.floor((OX + 30) / BW), 2, 4); return { x: side > 0 ? LW + Math.min(OX * .5, BW * sc * .42) : -Math.min(OX * .5, BW * sc * .42), y: LH * .78, sc, where: 'side' }; }
-  if (OY >= 40) { const sc = clamp(Math.floor((OY + 100) / BH), 2, 4); return { x: 160 + side * 40, y: clamp(BH * sc - OY + 2, -6, 96), sc, where: 'top' }; } // looms over the top of the box
+  // towers over the whole screen: taller than the viewport, head and arms cropped, feet below the bottom edge
+  if (OX >= 110) { const sc = clamp(Math.round(VH * 1.12 / 64), 4, 14); return { x: side > 0 ? LW + BW * sc * .3 : -BW * sc * .3, y: VH - OY + sc * 4, sc, where: 'side' }; }
+  if (OY >= 40) { const sc = clamp(Math.round(VW * 1.15 / 64), 4, 10); return { x: 160 + side * 30, y: clamp(64 * sc * .5 - OY, 20, 120), sc, where: 'top' }; } // looms over the top of the box
   return { x: BOSS_POS[0], y: BOSS_POS[1], sc: PSC, where: 'in' };
 }
 function bossMove(bo, dur) { const f = bo.f; bo.mv = { t: 0, dur, x0: f.x, y0: f.y, s0: f.sc, to: bossOutPos(bo), broke: false }; }
@@ -387,7 +389,7 @@ function updateBoss(dt) {
 }
 function mkReasm(cv) { // pixel list with scattered start positions: the new form flies together
   const g = cv.getContext('2d'), d = g.getImageData(0, 0, cv.width, cv.height).data, px = [];
-  for (let y = 0; y < cv.height; y++) for (let x = 0; x < cv.width; x++) { const i = (y * cv.width + x) * 4; if (d[i + 3] > 0) px.push([x, y, 'rgba(' + d[i] + ',' + d[i + 1] + ',' + d[i + 2] + ',' + (d[i + 3] / 255).toFixed(2) + ')', rnd(-40, 40), rnd(-30, 30), rnd(0, .35)]); }
+  const st = cv.R ? 2 : 1; for (let y = 0; y < cv.height; y += st) for (let x = 0; x < cv.width; x += st) { const i = (y * cv.width + x) * 4; if (d[i + 3] > 0) px.push([x, y, 'rgba(' + d[i] + ',' + d[i + 1] + ',' + d[i + 2] + ',' + (d[i + 3] / 255).toFixed(2) + ')', rnd(-40, 40) * (cv.R || 1), rnd(-30, 30) * (cv.R || 1), rnd(0, .35)]); }
   return px;
 }
 // ---------- boss attacks: a unique move per boss and phase ----------
@@ -396,7 +398,8 @@ function bossAttackFx(f, targets, slam) {
   const add = e => B.fx.push(Object.assign({ t: 0 }, e));
   if (out) { // an arm / tendril smashes in through the cracked frame, then the attack lands
     const ex = bcx > LW ? LW : bcx < 0 ? 0 : clamp(bcx, 20, LW - 20), ey = bcx > LW || bcx < 0 ? clamp(bcy, 60, 240) : 0;
-    targets.forEach(u => add({ type: 'reach', x0: bcx, y0: bcy, ex, ey, x: u.x + 14, y: u.y - 22, dur: .42, col: bo.D.crack }));
+    giantSwing(f, targets);
+    if (bo.k === 'mirror') targets.forEach(u => add({ type: 'reach', x0: bcx, y0: bcy, ex, ey, x: u.x + 14, y: u.y - 22, dur: .42, col: bo.D.crack }));
     addCracks(2, B.t);
   }
   const tx = targets.map(u => [u.x, u.y]);
@@ -417,6 +420,7 @@ function bossAttackFx(f, targets, slam) {
   }
 }
 function drawBossFx(e) {
+  if (e.type === 'giant') return drawGiant(e);
   const p = clamp(e.t / e.dur, 0, 1);
   if (e.type === 'shock') { // ground shockwave rolling toward the party
     const x = e.x + (e.to - e.x) * Math.min(1, p * 2.4), a = p < .6 ? 1 : (1 - p) / .4;
@@ -460,27 +464,29 @@ function drawBossFx(e) {
 }
 // draw the boss body: transforms, flicker, reassembly, orbiting shards, glitch rows
 function drawBossBody(f, x, y) {
-  const bo = B.boss, pose = bossPose(f), sc = f.sc || PSC, X = x - sc, Y = y - sc;
+  const bo = B.boss, pose = bossPose(f), S0 = f.sc || PSC, lk = bo.outside && !RM ? (pose.at > 0 ? 1 - Math.abs(pose.at - 3) / 3 : pose.wu / 8) : 0, SC = S0 * (1 + .07 * lk);
+  x -= (SC - S0) * BW / 2 + (bo.outside ? (x > 160 ? -1 : 1) * lk * 10 : 0); y -= (SC - S0) * BH;
   let cv = bossFrame(bo.k, bo.phase, pose); f._cv = cv;
+  const sc = SC / (cv.R || 1), X = x - 2 * sc, Y = y - 2 * sc; // sc: screen pixels per fine pixel
   const W = cv.width * sc, H = cv.height * sc, flash = f.flash > 0;
   // aura behind (rage / spirit) from phase 1 on
-  if (bo.phase > 0 && !RM) { ctx.globalAlpha = .18 + .08 * Math.sin(B.t * 5); const t2 = tinted(cv, bo.D.crack); for (const [a, b] of [[-sc, 0], [sc, 0], [0, -sc], [0, sc]]) ctx.drawImage(t2, X + a * 2, Y + b * 2, W, H); ctx.globalAlpha = 1; }
+  if (bo.phase > 0 && !RM) { ctx.globalAlpha = .18 + .08 * Math.sin(B.t * 5); const t2 = tinted(cv, bo.D.crack); for (const [a, b] of [[-SC, 0], [SC, 0], [0, -SC], [0, SC]]) ctx.drawImage(t2, X + a, Y + b, W, H); ctx.globalAlpha = 1; }
   if (bo.k === 'mirror' && bo.phase >= 2) drawShardOrbit(f, x, y, true);
   if (bo.st === 'phase') {
     const t = bo.t;
     if (t < .45 && bo.old) { // old form trembles and flickers white
-      const j = RM ? 0 : Math.round(rnd(-1, 1)) * sc; ctx.drawImage(Math.floor(t * 20) % 2 ? tinted(bo.old, '#ffffff') : bo.old, X + j, Y, W, H); return;
+      const j = RM ? 0 : Math.round(rnd(-1, 1)) * SC; ctx.drawImage(Math.floor(t * 20) % 2 ? tinted(bo.old, '#ffffff') : bo.old, X + j, Y, W, H); return;
     }
     const rv = clamp((t - .45) / .75, 0, 1);
     if (bo.tr === 'wipe' && bo.old && rv < 1) { // fire climbs the body from the ground up
       const cut = Math.round(cv.height * (1 - rv));
       ctx.drawImage(bo.old, 0, 0, cv.width, cut, X, Y, W, cut * sc);
       ctx.drawImage(cv, 0, cut, cv.width, cv.height - cut, X, Y + cut * sc, W, (cv.height - cut) * sc);
-      for (let i = 0; i < 24; i++) rect(X + Math.floor(rnd(cv.width)) * sc, Y + (cut - 1 - Math.floor(rnd(3))) * sc, sc, sc, pick(['#ff7a1a', '#ffb03a', '#fff3a8']));
+      for (let i = 0; i < 40; i++) rect(X + Math.floor(rnd(cv.width)) * sc, Y + (cut - 1 - Math.floor(rnd(6))) * sc, Math.max(1, sc), Math.max(1, sc), pick(['#ff7a1a', '#ffb03a', '#fff3a8']));
       return;
     }
     if (bo.tr === 'reasm' && bo.reasm && rv < 1) {
-      for (const [px, py, col, dx, dy, dl] of bo.reasm) { const k = ease(clamp((rv - dl) / (1 - dl), 0, 1)); ctx.fillStyle = col; ctx.fillRect(X + Math.round(px + dx * (1 - k)) * sc, Y + Math.round(py + dy * (1 - k)) * sc, sc, sc); }
+      for (const [px, py, col, dx, dy, dl] of bo.reasm) { const k = ease(clamp((rv - dl) / (1 - dl), 0, 1)); ctx.fillStyle = col; ctx.fillRect(X + Math.round(px + dx * (1 - k)) * sc, Y + Math.round(py + dy * (1 - k)) * sc, sc * 2, sc * 2); }
       return;
     }
     if (bo.tr === 'burst' && rv < .3) cv = tinted(cv, '#ffffff', 1 - rv / .3);
@@ -488,8 +494,8 @@ function drawBossBody(f, x, y) {
   if (flash) cv = tinted(cv, '#ffffff');
   else if (f.inv && Math.floor(B.t * 16) % 2) cv = tinted(cv, '#ffffff', .5);
   if (bo.k === 'mirror' && bo.phase >= 3 && !RM) { // glitch: horizontal slices slip sideways
-    const sl = 6;
-    for (let r = 0; r < cv.height; r += sl) { const off = (Math.floor(B.t * 9 + r) % 7 === 0) ? Math.round(rnd(-3, 3)) * sc : 0; ctx.drawImage(cv, 0, r, cv.width, Math.min(sl, cv.height - r), X + off, Y + r * sc, W, Math.min(sl, cv.height - r) * sc); }
+    const sl = 6 * (cv.R || 1);
+    for (let r = 0; r < cv.height; r += sl) { const off = (Math.floor(B.t * 9 + r) % 7 === 0) ? Math.round(rnd(-3, 3)) * SC : 0; ctx.drawImage(cv, 0, r, cv.width, Math.min(sl, cv.height - r), X + off, Y + r * sc, W, Math.min(sl, cv.height - r) * sc); }
   } else ctx.drawImage(cv, X, Y, W, H);
   if (f.wind > 0 && Math.floor(B.t * 14) % 2) { ctx.globalAlpha = .35; ctx.drawImage(tinted(cv, '#ff3a3a'), X, Y, W, H); ctx.globalAlpha = 1; }
   if (bo.k === 'mirror' && bo.phase >= 2) drawShardOrbit(f, x, y, false);

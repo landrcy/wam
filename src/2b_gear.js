@@ -31,7 +31,7 @@ Pix.prototype.raw = function (x, y) { return x < 0 || y < 0 || x >= this.w || y 
 Pix.prototype.put = function (x, y, mat, s = 2) { x = Math.floor(x) + this.ox; y = Math.floor(y) + this.oy; if (x < 0 || y < 0 || x >= this.w || y >= this.h) return; const i = y * this.w + x; this.m[i] = mat; this.s[i] = clamp(s, 0, 3); };
 Pix.prototype.at = function (x, y) { x += this.ox; y += this.oy; return x < 0 || y < 0 || x >= this.w || y >= this.h ? null : this.m[y * this.w + x]; };
 Pix.prototype.clear = function (x, y) { x += this.ox; y += this.oy; if (x >= 0 && y >= 0 && x < this.w && y < this.h) this.m[y * this.w + x] = null; };
-const lit = (nx, ny, nz, x, y) => { const l = -nx * .55 - ny * .65 + nz * .52 + (((x + y) & 1) ? .05 : -.05); return l > .6 ? 3 : l > .22 ? 2 : l > -.18 ? 1 : 0; };
+let lit = (nx, ny, nz, x, y) => { const l = -nx * .55 - ny * .65 + nz * .52 + (((x + y) & 1) ? .05 : -.05); return l > .6 ? 3 : l > .22 ? 2 : l > -.18 ? 1 : 0; };
 Pix.prototype.ell = function (cx, cy, rx, ry, mat, o = {}) {
   for (let y = Math.floor(cy - ry); y <= Math.ceil(cy + ry); y++) for (let x = Math.floor(cx - rx); x <= Math.ceil(cx + rx); x++) {
     const nx = (x + .5 - cx) / rx, ny = (y + .5 - cy) / ry, d = nx * nx + ny * ny; if (d > 1) continue;
