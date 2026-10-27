@@ -56,6 +56,8 @@ function drawArena(accent = GILD.m) {
   const bo = scene === 'battle' && B && B.boss;
   if (bo) drawCracks();
   rect(0, 0, LW, LH, '#000');
+  if (bo) drawBossEnv();
+  if (scene === 'battle' && B) drawFloor(B.act, bo ? clamp(1 - bo.exp / 24, 0, 1) : 1);
   ctx.fillStyle = '#121117';
   for (let y = 8; y < AH; y += 16) for (let x = 8; x < LW; x += 16) ctx.fillRect(x, y, 1, 1);
   if (bo && bo.integ < 1) { // shattered border: only jagged remnants
@@ -78,7 +80,7 @@ function panel(x, y, w, h, col = '#3a3a44') {
 }
 function goto(s) { scene = s; selItem = null; selSkill = null; evoPick = null; SFX.click(); persist(); }
 function tabs(y = 4) {
-  save.party.forEach((id, i) => btn(124 + i * 64, y, 60, 18, CLS[id].n, () => { tab = id; selItem = null; selSkill = null; SFX.click(); }, { sel: tab === id, badge: scene === 'skills' && (save.chars[id].sp > 0 || save.chars[id].stp > 0) }));
+  save.party.forEach((id, i) => btn(124 + i * 64, y, 60, 18, CLS[id].n, () => { tab = id; selItem = null; selSkill = null; SFX.click(); }, { sel: tab === id, badge: scene === 'skills' && (canEvolve(save.chars[id]) || newlyLit(save.chars[id]).length > 0) }));
   if (!save.party.includes(tab)) tab = save.party[0];
 }
 function backBtn() { btn(8, 292, 70, 22, 'Back', () => goto('camp')); }
@@ -89,7 +91,7 @@ function drawTitle() {
   T('W.A.M.', 160, 54, '#ffffff', 4, 'c', '#24242c');
   const bob = Math.floor(gtime * 2) % 2;
   rect(160 - 22, 196, 44, 3, '#16161c');
-  drawSpr('warrior', 160 - 30, 136 - bob, 5);
+  drawChar(save.chars.warrior, 160 - 30, 136 - bob, 5);
   const ph = (gtime % 2.4) / 2.4; // sword glint travelling up the blade
   if (ph < .35) { const gy = 136 - bob + Math.round((5 - ph / .35 * 5)) * 5 + 5; rect(160 + 20, gy, 5, 5, '#ffffff'); rect(160 + 17, gy + 2, 11, 1, '#ffffff'); rect(160 + 22, gy - 3, 1, 11, '#ffffff'); }
   const has = save.started;
@@ -138,16 +140,16 @@ function drawCamp() {
   ORDER.forEach((id, i) => {
     const x = 10 + i * 104, c = save.chars[id], got = save.party.includes(id);
     const bob = got ? Math.floor(gtime * 2 + i) % 2 : 0;
-    drawSpr(c ? charSpr(c) : CLS[id].spr, x, qy + 4 - bob, 3, got ? '' : 'dim');
+    if (c && got) drawChar(c, x, qy + 4 - bob, 3, '', { seed: i }); else drawSpr(CLS[id].spr, x, qy + 4 - bob, 3, 'dim');
     if (got) {
       T(charName(c), x + 40, qy + 6, id === save.active ? COL.white : COL.dim);
       T('Lv ' + c.lvl, x + 40, qy + 20, COL.dim);
-      if (c.lvl >= TUNE.evoLevel && !c.evo && Math.floor(gtime * 3) % 2) T('evolve!', x + 40, qy + 32, COL.gold);
+      if (canEvolve(c) && Math.floor(gtime * 3) % 2) T('evolve!', x + 40, qy + 32, COL.gold);
       if (id === save.active) rect(x + 16, qy - 2, 4, 2, COL.white);
     }
   });
-  const anySp = save.party.some(id => save.chars[id].sp > 0 || save.chars[id].stp > 0);
-  const anyEvo = save.party.some(id => save.chars[id].lvl >= TUNE.evoLevel && !save.chars[id].evo);
+  const anySp = save.party.some(id => canEvolve(save.chars[id]) || newlyLit(save.chars[id]).length > 0);
+  const anyEvo = save.party.some(id => canEvolve(save.chars[id]));
   btn(8, 280, 88, 32, TOUCH ? 'Fight' : 'Fight (J)', () => startLevel(save.sel), { border: COL.gold, col: COL.gold });
   btn(102, 280, 66, 32, 'Gear', () => { tab = save.active; goto('gear'); });
   btn(174, 280, 66, 32, 'Skills', () => { tab = save.active; goto('skills'); }, { badge: anySp });
@@ -179,7 +181,7 @@ function claimForge() {
 }
 function drawItemCell(it, x, y, s, dim, sel) {
   slotBox(x, y, s, s, sel ? '#ffffff' : RAR[it.rar].c + (dim ? '55' : 'cc'));
-  drawIcon(itemIcon(it), x + (s - 16) / 2, y + (s - 16) / 2, 2, RAR[it.rar].c);
+  drawGearArt(it, x + s / 2, y + s / 2, 2);
   if (dim) { ctx.globalAlpha = .6; rect(x + 1, y + 1, s - 2, s - 2, '#000'); ctx.globalAlpha = 1; }
 }
 function drawGear() {
@@ -189,7 +191,7 @@ function drawGear() {
     const y = 28 + i * 28, it = c.gear[sl], sel = selItem && selItem.it === it && it;
     panel(8, y, 150, 26, sel ? '#ffffff' : '#2a2a32');
     if (it) {
-      drawIcon(itemIcon(it), 12, y + 5, 2, RAR[it.rar].c);
+      drawGearArt(it, 20, y + 13, 2);
       T(it.name, 34, y + 3, RAR[it.rar].c); T(modLines(it).slice(0, 2).join(' '), 34, y + 14, COL.dim);
       hit(8, y, 150, 26, () => { selItem = { it, eq: true }; SFX.click(); });
     } else T('no ' + (sl === 'weapon' ? CLS[tab].weapon : sl), 34, y + 8, COL.dark);
@@ -225,40 +227,116 @@ function drawGear() {
   btn(188, 244, 124, 20, 'Scrap worse', scrapWorse, { dis: !save.inv.length, col: COL.dim });
   backBtn();
 }
-// ---------- skills ----------
+// ---------- skills: a scrollable, zoomable rune constellation per character ----------
+const TV = {}; let treeSel = null, treeAnim = [], treeDrag = null;
+const ZOOMS = [.5, 1, 2];
+function tview(id) { if (!TV[id]) { const c = save.chars[id], T = buildTree(id), f = treeFocus(c); TV[id] = { x: f.x, y: f.y, zi: 1 }; } return TV[id]; }
+function treeFocus(c) { const T = buildTree(c.id); const p = T.N.find(n => nodeState(c, n) === 'pick') || [...T.N].reverse().find(n => nodeState(c, n) === 'own') || T.N[0]; return { x: p.x, y: p.y + 40 }; }
+const TREE_CLIP = [4, 24, 312, 196];
+function treeToScr(v, n) { const z = ZOOMS[v.zi]; return [Math.round(160 + (n.x - v.x) * z), Math.round(TREE_CLIP[1] + TREE_CLIP[3] / 2 + (n.y - v.y) * z)]; }
+function treePan(dx, dy) { const v = tview(tab), z = ZOOMS[v.zi]; v.x = clamp(v.x - dx / z, -190, 190); v.y = clamp(v.y - dy / z, -420, 30); }
+function treeZoom(d) { const v = tview(tab); v.zi = clamp(v.zi + d, 0, ZOOMS.length - 1); SFX.click(); }
+const KINDCOL = { root: '#e6e6f0', passive: '#a6caff', active: '#ff9a5a', bar: '#ffe070', evo: '#d6a6ff' };
+const KINDN = { root: 'Origin', passive: 'Passive', active: 'Active', bar: 'Timing bar', evo: 'Evolution' };
+function nodeInfo(c, n) {
+  if (n.k === 'evo') { const E = EVO[n.evo]; return { n: E.n, d: [...E.d, ...(E.atk ? ['Moves: ' + ({ smite: 'holy smite', spin: 'whirlwind', fan: 'arrow fan', blink: 'blink strikes', fire: 'fireballs', ice: 'ice lances', snipe: 'piercing snipe', void: 'void bolts' }[E.atk] || E.atk)] : [])] }; }
+  if (n.k === 'root') { const G = GROW[c.id]; return { n: CLS[c.id].n, d: ['Every level: +' + Math.round(G.hp * 100) + '% life, +' + Math.round(G.dmg * 100) + '% damage', 'armor, crit' + (G.spd ? ' and speed' : '') + ' grow on their own'] }; }
+  return { n: n.n + (n.rank > 1 ? ' II' : ''), d: [n.d + (n.rank > 1 ? ' (x' + n.rank + ')' : '')] };
+}
 function drawSkills() {
   drawArena(); tabs(); T('Skills', 8, 7, COL.white);
-  const c = save.chars[tab], tree = SKILLS[tab];
-  T(charName(c) + '  Lv ' + c.lvl, 8, 28, COL.white);
-  bar(8, 41, 120, 2, c.xp / xpNeed(c.lvl), COL.blue);
-  T('Skill pts ' + c.sp, 312, 28, c.sp ? COL.gold : COL.dim, 1, 'r');
-  T('Stat pts ' + c.stp, 312, 44, c.stp ? COL.gold : COL.dim, 1, 'r');
-  [['dmg', 'Damage'], ['life', 'Life'], ['spd', 'Speed']].forEach(([k, n], i) => {
-    const x = 8 + i * 104;
-    T(n + ' ' + c.st[k], x, 64, COL.white);
-    btn(x + 72, 60, 22, 18, '+', () => { if (c.stp > 0) { c.stp--; c.st[k]++; SFX.click(); persist(); } }, { dis: c.stp <= 0 });
-  });
-  tree.forEach((s, i) => {
-    const col = i % 3, row = Math.floor(i / 3), x = 8 + col * 104, y = 92 + row * 54;
-    const rk = c.sk[s.k] || 0, locked = s.req && !(c.sk[s.req] > 0), sel = selSkill === s.k;
-    if (row === 1) rect(x + 47, y - 20, 2, 20, (c.sk[s.req] || 0) > 0 ? '#8a8a96' : '#26262e');
-    panel(x, y, 96, 34, sel ? '#ffffff' : locked ? '#1e1e24' : rk ? COL.gold + '99' : '#3a3a44');
-    T(s.n, x + 48, y + 5, locked ? COL.dark : COL.white, 1, 'c');
-    for (let p = 0; p < SKMAX; p++) { const px = x + 36 + p * 9; if (p < rk) rect(px, y + 22, 6, 6, COL.gold); else frame(px, y + 22, 6, 6, locked ? '#26262e' : '#5a5a66'); }
-    hit(x, y, 96, 34, () => { selSkill = s.k; SFX.click(); });
-  });
-  panel(8, 204, 304, 70, '#2a2a32');
-  const s = tree.find(x => x.k === selSkill);
-  if (s) {
-    const rk = c.sk[s.k] || 0, locked = s.req && !(c.sk[s.req] > 0);
-    T(s.n + '  ' + rk + '/' + SKMAX, 16, 210, COL.gold);
-    wrap(s.d, 210).forEach((l, i) => T(l, 16, 226 + i * 12, COL.white));
-    if (locked) T('needs ' + tree.find(x => x.k === s.req).n, 16, 256, COL.red);
-    btn(236, 248, 70, 20, 'Learn', () => { c.sp--; c.sk[s.k] = rk + 1; SFX.lvl(); persist(); }, { dis: locked || rk >= SKMAX || c.sp <= 0, col: COL.gold });
+  const c = save.chars[tab], Tr = buildTree(tab), v = tview(tab), z = ZOOMS[v.zi], [cx0, cy0, cw, ch] = TREE_CLIP;
+  // unlock animations for nodes that lit up since you last looked
+  for (const n of newlyLit(c)) { c.seen.push(n.id); treeAnim.push({ id: n.id, t: 0 }); if (treeAnim.length === 1) SFX.lvl(); persist(); }
+  panel(cx0 - 2, cy0 - 2, cw + 4, ch + 4, '#3a3a44');
+  ctx.save(); ctx.beginPath(); ctx.rect(cx0, cy0, cw, ch); ctx.clip();
+  rect(cx0, cy0, cw, ch, '#07060c');
+  // parallax starfield
+  for (let i = 0; i < 90; i++) {
+    const sx = ((i * 97.3 - v.x * .3 * z) % cw + cw) % cw, sy = ((i * 53.7 + i * i * .7 - v.y * .3 * z) % ch + ch) % ch, tw = RM ? 1 : (Math.sin(gtime * 2 + i) + 1) / 2;
+    rect(cx0 + Math.round(sx), cy0 + Math.round(sy), 1, 1, tw > .7 ? '#8a86a8' : '#2c2a3c');
+  }
+  // rune rings around the origin
+  const [rx, ry] = treeToScr(v, Tr.by.root);
+  for (let r = 0; r < 2; r++) { const R = (16 + r * 8) * z; for (let k = 0; k < 24 + r * 12; k++) { const a = k / (24 + r * 12) * Math.PI * 2 + (RM ? 0 : gtime * (r ? -.2 : .3)); rect(Math.round(rx + Math.cos(a) * R), Math.round(ry + Math.sin(a) * R), 1, 1, k % 3 ? '#3a3450' : '#6a5426'); } }
+  // paths
+  const st = {}; Tr.N.forEach(n => st[n.id] = nodeState(c, n));
+  for (const n of Tr.N) {
+    if (!n.from) continue; const p = Tr.by[n.from], [ax, ay] = treeToScr(v, p), [bx, by] = treeToScr(v, n);
+    const lit = st[n.id] === 'own' && st[p.id] === 'own', pk = st[n.id] === 'pick', seal = st[n.id] === 'seal';
+    const L = Math.max(1, Math.hypot(bx - ax, by - ay)), steps = Math.ceil(L);
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps, x = Math.round(ax + (bx - ax) * t), y = Math.round(ay + (by - ay) * t);
+      if (seal && i % 4) continue;
+      let col = seal ? '#1c1a24' : lit ? '#9a7428' : pk ? '#5a5070' : '#2a2836';
+      if (lit && !RM) { const ph = (i - gtime * 40) % 18; if (ph > -3 && ph < 0) col = '#fff0a0'; else if (ph < 0 && ph > -6) col = '#d8b04a'; }
+      if (pk && !RM && Math.floor(i / 3 - gtime * 6) % 3 === 0) col = '#e6e6f0';
+      rect(x, y, 1, 1, col); if (lit) rect(x + 1, y, 1, 1, darken(col, .4));
+    }
+  }
+  // nodes
+  for (const n of Tr.N) {
+    const [x, y] = treeToScr(v, n), S = st[n.id], big = n.k === 'evo' || n.k === 'root';
+    const r = (big ? 13 : 9) * (z >= 2 ? 2 : 1) * (z < 1 ? .7 : 1);
+    if (x < cx0 - 30 || x > cx0 + cw + 30 || y < cy0 - 30 || y > cy0 + ch + 30) continue;
+    const kc = KINDCOL[n.k], edge = S === 'own' ? kc : S === 'pick' ? '#ffffff' : S === 'seal' ? '#1e1c26' : '#4a4652';
+    const sel = treeSel === n.id, pulse = RM ? .5 : (Math.sin(gtime * 5) + 1) / 2;
+    if (S === 'own') { ctx.globalAlpha = .18 + .1 * pulse; rect(x - r - 3, y - r - 3, r * 2 + 6, r * 2 + 6, kc); ctx.globalAlpha = 1; }
+    if (S === 'pick') { ctx.globalAlpha = .3 + .4 * pulse; frame(x - r - 3, y - r - 3, r * 2 + 6, r * 2 + 6, '#ffffff'); ctx.globalAlpha = 1; }
+    // frame shape by kind: circle passive, diamond active, square bar, ornate hex evo
+    const R = Math.round(r);
+    if (n.k === 'active') { for (let i = -R; i <= R; i++) { const w = R - Math.abs(i); rect(x - w, y + i, w * 2 + 1, 1, '#0c0a12'); rect(x - w - 1, y + i, 1, 1, edge); rect(x + w + 1, y + i, 1, 1, edge); } }
+    else if (n.k === 'bar') { rect(x - R, y - R, R * 2, R * 2, '#0c0a12'); frame(x - R, y - R, R * 2, R * 2, edge); rect(x - R + 2, y + R - 3, R * 2 - 4, 1, S === 'own' ? COL.gold : '#3a3444'); }
+    else if (n.k === 'evo' || n.k === 'root') { for (let i = -R; i <= R; i++) { const w = Math.round(R - Math.max(0, Math.abs(i) - R / 2)); rect(x - w, y + i, w * 2, 1, '#0c0a12'); rect(x - w - 1, y + i, 1, 1, edge); rect(x + w, y + i, 1, 1, edge); } rect(x - R / 2, y - R - 1, R, 1, edge); rect(x - R / 2, y + R, R, 1, edge); for (const [gx, gy] of [[0, -R - 3], [0, R + 2]]) rect(x + gx - 1, y + gy, 2, 2, S === 'own' ? GILD.h : '#3a3444'); }
+    else { for (let i = -R; i <= R; i++) { const w = Math.round(Math.sqrt(R * R - i * i)); rect(x - w, y + i, w * 2, 1, '#0c0a12'); rect(x - w - 1, y + i, 1, 1, edge); rect(x + w, y + i, 1, 1, edge); } }
+    // art: a pixel icon, or for evolutions/origin the character wearing that look
+    const isc = z >= 2 ? 2 : 1;
+    if (n.k === 'evo' || n.k === 'root') {
+      const fc = Object.assign({}, c, { evo: n.k === 'root' ? null : n.evo });
+      const s2 = z >= 2 ? 2 : 1;
+      drawChar(fc, x - 6 * s2, y - 7 * s2, s2, S === 'own' || S === 'pick' || n.k === 'root' ? '' : 'dim', { noCape: z < 1 });
+    } else if (n.ic && SKICON[n.ic]) {
+      const ic = skillIcon(n.ic, S === 'own' ? 'own' : S === 'pick' || S === 'open' ? 'open' : 'lock');
+      if (S === 'seal') ctx.globalAlpha = .35;
+      ctx.drawImage(ic, x - Math.round(ic.width * isc / 2), y - Math.round(ic.height * isc / 2), ic.width * isc, ic.height * isc); ctx.globalAlpha = 1;
+    }
+    if (S === 'lock' || S === 'open') drawPadlock(x + R - 4, y + R - 5, S === 'open' ? COL.gold : '#5a5a66');
+    if (sel) { const k = RM ? 0 : Math.floor(gtime * 8) % 2; corners(x - R - 4 - k, y - R - 4 - k, R * 2 + 9 + k * 2, R * 2 + 9 + k * 2, '#ffffff', 4); }
+    hit(Math.max(cx0, x - R - 2), Math.max(cy0, y - R - 2), R * 2 + 4, R * 2 + 4, () => { treeSel = n.id; SFX.click(); });
+  }
+  // unlock bursts
+  treeAnim = treeAnim.filter(a => a.t < 1.2);
+  for (const a of treeAnim) {
+    a.t += 1 / 60; const n = Tr.by[a.id]; if (!n) continue; const [x, y] = treeToScr(v, n), k = a.t / 1.2, col = KINDCOL[n.k];
+    ctx.globalAlpha = 1 - k; const R = 6 + k * 26;
+    for (let i = 0; i < 16; i++) { const an = i / 16 * Math.PI * 2; rect(Math.round(x + Math.cos(an) * R), Math.round(y + Math.sin(an) * R), 2, 2, i % 2 ? col : '#ffffff'); }
+    if (k < .3) { ctx.globalAlpha = (.3 - k) * 2; rect(x - 12, y - 12, 24, 24, '#ffffff'); }
+    ctx.globalAlpha = 1; if (k < .6) T('unlocked', x, y - 26 - Math.round(k * 10), col, 1, 'c', '#000');
+  }
+  ctx.restore();
+  // drag to pan; wheel or buttons to zoom
+  UI.unshift({ x: cx0, y: cy0, w: cw, h: ch, fn: () => {}, drag: true });
+  btn(282, 196, 14, 14, '+', () => treeZoom(1), { dis: v.zi >= ZOOMS.length - 1 }); btn(298, 196, 14, 14, '-', () => treeZoom(-1), { dis: v.zi <= 0 });
+  btn(230, 196, 48, 14, 'center', () => { const f = treeFocus(c); v.x = f.x; v.y = f.y; SFX.click(); });
+  // tooltip in the game font
+  T(charName(c) + '  Lv ' + c.lvl, 8, 28, COL.white, 1, 'l', '#000');
+  bar(8, 40, 90, 2, c.xp / xpNeed(c.lvl), COL.blue);
+  panel(4, 224, 312, 64, '#2a2a32');
+  const n = treeSel && Tr.by[treeSel];
+  if (n) {
+    const S = nodeState(c, n), I = nodeInfo(c, n);
+    T(I.n, 12, 230, KINDCOL[n.k]); T(KINDN[n.k], 308, 230, COL.dim, 1, 'r');
+    I.d.slice(0, 3).forEach((l, i) => T(l, 12, 243 + i * 11, COL.white));
+    const foot = S === 'own' ? 'Unlocked' : S === 'seal' ? 'Sealed: another path was chosen' : S === 'pick' ? 'A fork: choose one path' : n.q ? reqText(n.q) : '';
+    if (S !== 'pick') T(foot, 308, 276, S === 'own' ? COL.green : S === 'seal' ? COL.dark : COL.gold, 1, 'r');
+    else btn(212, 266, 96, 18, 'Take this path', () => {
+      c.evo = n.evo; const E = EVO[n.evo]; SFX.lvl(); treeAnim.push({ id: n.id, t: 0 }); c.seen.push(n.id); persist();
+      msgQueue.push({ title: E.n + '!', char: c, col: COL.gold, lines: ['The ' + CLS[c.id].n + ' evolved.', ...E.d] }); msgReturn = 'skills'; scene = 'msg';
+    }, { col: COL.gold, border: COL.gold });
   } else {
-    T('Level up to earn points.', 16, 212, COL.dim);
-    T('Each level: 1 skill point, 2 stat points.', 16, 226, COL.dark);
-    T('Evolve at Lv ' + TUNE.evoLevel + ' in the Party screen.', 16, 240, COL.dark);
+    T('Nodes light up as you level and beat bosses.', 12, 232, COL.dim);
+    T('At each fork you pick one path for good.', 12, 245, COL.dim);
+    T(TOUCH ? 'Drag to look around, tap a node.' : 'Drag or scroll to look, click a node.', 12, 258, COL.dark);
   }
   backBtn();
 }
@@ -269,7 +347,7 @@ function drawParty() {
     const x = 8 + i * 104, c = save.chars[id], got = save.party.includes(id);
     panel(x, 26, 98, 258, got && id === save.active ? '#8a8a96' : '#26262e');
     const bob = got ? Math.floor(gtime * 2 + i) % 2 : 0;
-    drawSpr(c ? charSpr(c) : CLS[id].spr, x + 25, 36 - bob, 4, got ? '' : 'dim');
+    if (c && got) drawChar(c, x + 25, 40 - bob, 4, '', { seed: i }); else drawSpr(CLS[id].spr, x + 25, 36 - bob, 4, 'dim');
     if (!got) { T('?', x + 49, 110, COL.dark, 2, 'c'); return; }
     const s = calcStats(c);
     T(charName(c), x + 49, 92, COL.white, 1, 'c');
@@ -278,27 +356,12 @@ function drawParty() {
     T('DMG ' + Math.round(s.dmg), x + 8, 128, COL.white); T('LIFE ' + s.hp, x + 8, 141, COL.white);
     T('ARM ' + s.arm, x + 8, 154, COL.white); T((1 / s.cd).toFixed(1) + '/s', x + 8, 167, COL.white);
     btn(x + 8, 200, 82, 20, id === save.active ? 'Leading' : 'Lead', () => { save.active = id; SFX.click(); persist(); }, { sel: id === save.active });
-    if (c.evo) T('evolved', x + 49, 232, COL.dim, 1, 'c');
-    else if (c.lvl >= TUNE.evoLevel) btn(x + 8, 226, 82, 22, 'Evolve', () => { evoPick = id; SFX.click(); }, { col: COL.gold, border: COL.gold });
-    else T('evolves Lv ' + TUNE.evoLevel, x + 49, 232, COL.dark, 1, 'c');
+    const tier = c.evo ? EVO[c.evo].tier : 0;
+    if (canEvolve(c)) btn(x + 8, 226, 82, 22, 'Evolve', () => { tab = id; treeSel = null; delete TV[id]; goto('skills'); }, { col: COL.gold, border: COL.gold });
+    else T(tier >= 3 ? 'final form' : 'evolves Lv ' + EVOLV[tier], x + 49, 232, COL.dark, 1, 'c');
+    T('tier ' + tier + '/3', x + 49, 250, COL.dim, 1, 'c');
   });
   backBtn();
-  if (evoPick) {
-    UI = [];
-    ctx.globalAlpha = .85; rect(0, 0, LW, AH, '#000'); ctx.globalAlpha = 1;
-    panel(8, 20, 304, 280, COL.gold);
-    T('Evolve the ' + CLS[evoPick].n, 160, 28, COL.gold, 1, 'c');
-    T('choose a path, it is permanent', 160, 41, COL.dim, 1, 'c');
-    CLS[evoPick].evos.forEach((ek, i) => {
-      const E = EVO[ek], x = 16 + i * 148;
-      panel(x, 56, 140, 206, '#3a3a44');
-      drawSpr(E.spr, x + 46, 64 + (Math.floor(gtime * 2) % 2), 4);
-      T(E.n, x + 70, 120, COL.white, 1, 'c');
-      let y = 136; E.d.forEach(d => wrap(d, 128).forEach(l => { T(l, x + 6, y, COL.dim); y += 11; }));
-      btn(x + 20, 234, 100, 22, 'Choose', () => { save.chars[evoPick].evo = ek; SFX.lvl(); persist(); msgQueue.push({ title: E.n + '!', spr: E.spr, col: COL.gold, lines: ['The ' + CLS[evoPick].n + ' evolved.', ...E.d] }); evoPick = null; scene = 'msg'; msgReturn = 'party'; }, { col: COL.gold });
-    });
-    btn(120, 270, 80, 22, 'Cancel', () => { evoPick = null; SFX.click(); });
-  }
 }
 // ---------- message cards ----------
 let msgReturn = 'camp';
@@ -308,9 +371,10 @@ function drawMsg() {
   drawArena(m.col);
   const sc = textW(m.title, 2) <= 290 ? 2 : 1;
   T(m.title, 160, 30, m.col, sc, 'c', '#24242c');
-  const [w, h] = sprSize(m.spr, 5);
+  if (m.char) { rect(138, 140, 44, 3, '#16161c'); drawChar(m.char, 130, 84 - (Math.floor(gtime * 2) % 2), 5); }
+  else { const [w, h] = sprSize(m.spr, 5);
   rect(160 - w / 2 + 8, 76 + h, w - 16, 3, '#16161c');
-  drawSpr(m.spr, 160 - w / 2, 76 - (Math.floor(gtime * 2) % 2), 5, '', FOES[m.spr] && FOES[m.spr].outline || null);
+  drawSpr(m.spr, 160 - w / 2, 76 - (Math.floor(gtime * 2) % 2), 5, '', FOES[m.spr] && FOES[m.spr].outline || null); }
   for (let i = 0; i < 6; i++) { const a = gtime * 1.5 + i * 1.047, r = 52 + Math.sin(gtime * 3 + i) * 4; rect(160 + Math.cos(a) * r, 108 + Math.sin(a) * r * .6, 2, 2, i % 2 ? m.col : '#ffffff'); }
   m.lines.forEach((l, i) => T(l, 160, 168 + i * 13, COL.white, 1, 'c'));
   if (Math.floor(gtime * 2) % 2 === 0) T(TOUCH ? 'tap to continue' : 'J to continue', 160, 296, COL.dim, 1, 'c');

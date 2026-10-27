@@ -25,15 +25,19 @@ addEventListener('resize', resize); resize();
 
 // ---------- tuning knobs (tweak here) ----------
 const TUNE = {
-  markerSpeed: 0.95,      // timing-bar sweeps per second (base)
-  goodZone: 0.24,         // width of the GOOD zone (fraction of bar)
-  perfectZone: 0.065,     // width of the PERFECT zone
+  markerSpeed: 1.12,      // timing-bar sweeps per second (base)
+  goodZone: 0.19,         // width of the GOOD zone (fraction of bar)
+  perfectZone: 0.05,      // width of the PERFECT zone
   perfectMult: 2.0,       // damage multiplier for perfect
   missMult: 0,            // damage multiplier for a miss
-  autoCdMul: 1.55,        // allies auto-attack this much slower than their cooldown
-  autoDmgMul: 0.8,        // allies' auto attack damage
-  foeHp: 20, foeHpGrow: 1.42,
-  foeDmg: 4.6, foeDmgGrow: 1.36,
+  autoCdMul: 1.7,         // allies auto-attack this much slower than their cooldown
+  autoDmgMul: 0.6,        // allies' auto attack damage
+  foeHp: 24, foeHpGrow: 1.44,
+  foeDmg: 6.2, foeDmgGrow: 1.37,
+  foeRate: 0.78,          // foe attack period multiplier (lower = more often)
+  bossHp: 1.35,           // extra boss life
+  missLock: 0.25,         // extra cooldown after a miss
+  chainStep: 0.05, chainMax: 0.5, // perfect-chain damage bonus per perfect in a row
   dropChance: 0.4,
   forgeCost: 12,
   evoLevel: 5,
@@ -50,6 +54,13 @@ const PAL = {
   n:'#2c2c36', m:'#141018', e:'#ff4060', t:'#e86aa0',
   '1':'#ffb04a', '2':'#9cff6a', '3':'#ff4a5a', '4':'#e8e0ff'
 };
+// per-act palette: dust puffs, rim light, floor tones, ambient motes
+const ACTPAL = [
+  { dust: ['#3e4632', '#5a6644', '#2a3022'], rim: '#d8f0b0', floor: '#0f140c', line: '#1a2414', mote: '#9fd08a' },
+  { dust: ['#463626', '#5e4a34', '#2e2218'], rim: '#ffbe7a', floor: '#120d08', line: '#22180e', mote: '#ffb070' },
+  { dust: ['#36364a', '#4e4e66', '#22222e'], rim: '#b0b8ff', floor: '#0c0c14', line: '#181826', mote: '#a0a0c8' },
+  { dust: ['#36264a', '#523a6e', '#22182e'], rim: '#e0b0ff', floor: '#0e0816', line: '#1c1228', mote: '#b480ff' },
+];
 const COL = { white:'#f2f2f2', dim:'#8a8a96', dark:'#45454f', gold:'#ffd35a', red:'#ff5a5a', green:'#7ee07e', blue:'#7aa8ff', panel:'#0b0b0e', line:'#2c2c34' };
 
 // ---------- bitmap font (traced from the reference alphabet) ----------
@@ -433,6 +444,8 @@ const SFX = {
   wind() { tone(196, .07, 'triangle', .14); tone(196, .07, 'triangle', .1, 0, .12); },
   arrow() { noise(.05, .2, 5000); tone(1300, .05, 'triangle', .08, -700); },
   orb() { tone(420, .14, 'sine', .2, 500); },
+  clang() { tone(2350, .18, 'square', .1, -300); tone(3100, .12, 'triangle', .08, -900, .02); noise(.06, .3, 7000); },
+  whoosh() { noise(.12, .18, 900); },
   parry() { tone(1760, .12, 'square', .16, -600); noise(.1, .3, 6000); },
   win() { [523, 659, 784, 659, 1046].forEach((f, i) => tone(f, .12, 'square', .14, 0, i * .09)); },
   lose() { [392, 330, 262, 196].forEach((f, i) => tone(f, .18, 'triangle', .2, 0, i * .14)); },

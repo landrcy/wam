@@ -9,15 +9,15 @@ function startLevel(li) {
   const n = save.party.length;
   B = { li, act: Math.floor(li / 3), wave: 0, foes: [], units: [], t: 0, mk: 0, md: 1, zc: .5, cd: 0, state: 'intro', st: 1.0,
     fx: [], parts: [], nums: [], proj: [], shake: 0, hitstop: 0, loot: [], xp: 0, streak: 0, perf: 0, target: 0,
-    buff: { dmg: 0, spd: 0, heal: 0 }, gobUsed: {}, label: null, flash: null, banner: null, paused: false, msgs: [], quake: 0, zBase: .5, boss: null, trail: [], crackFx: null, barShake: 0 };
+    buff: { dmg: 0, spd: 0, heal: 0 }, gobUsed: {}, label: null, flash: null, banner: null, paused: false, msgs: [], quake: 0, zBase: .5, boss: null, trail: [], heat: 0, slowT: 0, zc2: .2, zw: .8, novaC: {}, shC: {}, crackFx: null, barShake: 0, eproj: [], combo: 0, impact: 0, zoom: null, dust: [] };
   B.units = save.party.map((id, i) => {
     const c = save.chars[id], s = calcStats(c), [x, y] = PPOS[n][i];
-    return { id, c, s, hp: s.hp, max: s.hp, x, y, ox: -60, lt: 0, hurt: 0, atkT: rnd(.4, 1.2), dead: false, guard: 0, spr: charSpr(c) };
+    return { id, c, s, hp: s.hp, max: s.hp, x, y, bx: x, ox: -60, lt: 0, hurt: 0, atkT: rnd(.4, 1.2), dead: false, guard: 0, spr: charSpr(c), dash: null, hop: 0, kb: 0, cast: 0, seed: i * 1.7 };
   });
   const bar = B.units.reduce((a, u) => a + (u.s.barrier || 0), 0);
   B.units.forEach(u => u.s.arm += bar);
   if (!save.party.includes(save.active)) save.active = save.party[0];
-  spawnWave(0);
+  spawnWave(0); rerollBar();
   scene = 'battle';
   banner(ACTS[B.act].roman + '-' + (li % 3 + 1) + '  ' + LEVELS[li].n, ACTS[B.act].c, 1.4);
 }
@@ -25,19 +25,22 @@ function spawnWave(w) {
   const keys = LEVELS[B.li].w[w], n = keys.length;
   B.foes = keys.map((k, i) => {
     const T = FOES[k], L = B.li + 1, [x, y] = FPOS[n][i];
-    const hp = Math.round(TUNE.foeHp * Math.pow(TUNE.foeHpGrow, L - 1) * T.hp);
-    return { k, T, L, hp, max: hp, dmg: TUNE.foeDmg * Math.pow(TUNE.foeDmgGrow, L - 1) * T.dmg, timer: T.per * rnd(.7, 1.1) + .9, wind: 0,
+    const hp = Math.round(TUNE.foeHp * Math.pow(TUNE.foeHpGrow, L - 1) * T.hp * (T.boss ? TUNE.bossHp : 1));
+    return { k, T, L, hp, max: hp, dmg: TUNE.foeDmg * Math.pow(TUNE.foeDmgGrow, L - 1) * T.dmg, timer: T.per * TUNE.foeRate * rnd(.7, 1.1) + .9, wind: 0, per: T.per * TUNE.foeRate, pend: null, anim: null, dodge: 0,
       x, y, spr: T.spr, sc: T.sc, ox: 90 + i * 12, flash: 0, kx: 0, dead: false, burnT: 0, burnDps: 0, burnAcc: 0, chill: 0, freeze: 0, lt: 0, atk: 0, reviveT: 0, seed: rnd(10) };
   });
   B.target = B.foes.findIndex(f => f.T.boss) >= 0 ? B.foes.findIndex(f => f.T.boss) : 0;
-  B.gobUsed = {};
+  B.gobUsed = {}; if (B.units) B.units.forEach(u => u.aegis = u.s.aegis ? 1 : 0);
   const bf = B.foes.find(f => f.T.boss && BOSS[f.k]); if (bf) bossStart(bf);
   const tip = keys.map(k => FOE_TIPS[k]).find(Boolean);
   if (tip && w === 0) B.tip = { txt: tip, t: 3.5 };
 }
+function unitAtk(u) { return evoField(u.c, 'atk', CLS[u.id].atk); }
+function unitBar(u) { return u ? evoField(u.c, 'bar', null) : null; }
+function rerollBar() { B.zc2 = B.zc < .5 ? rnd(Math.min(.86, B.zc + .3), .88) : rnd(.12, Math.max(.14, B.zc - .3)); B.zw = B.zc < .5 ? rnd(Math.min(.86, B.zc + .25), .88) : rnd(.12, Math.max(.14, B.zc - .25)); }
 const activeUnit = () => B.units.find(u => u.id === save.active && !u.dead);
 const liveFoes = () => B.foes.filter(f => !f.dead);
-function sprSize(key, sc) { const r = SPR[key]; return [r[0].length * sc, r.length * sc]; }
+function sprSize(key, sc) { const r = SPR[key]; if (!r) return [BW * sc, BH * sc]; return [r[0].length * sc, r.length * sc]; }
 function foeCenter(f) { const [w, h] = sprSize(f.spr, f.sc); return [f.x + f.ox + f.kx, f.y - h / 2 - (f.T.fly ? 10 : 0)]; }
 const PSC = 4;
 function unitCenter(u) { return [u.x + u.ox, u.y - 24]; }
@@ -49,7 +52,7 @@ function getTarget() {
 function zones() {
   const u = activeUnit(); if (!u) return { g: .2, p: .06 };
   const zm = 1 + (u.s.zone || 0) / 100;
-  const g = clamp(TUNE.goodZone * u.s.goodZ * zm, .08, .6);
+  const g = clamp(TUNE.goodZone * u.s.goodZ * zm * (unitBar(u) === 'frost' ? 1.15 : 1), .08, .6);
   const pat = bossPat(), bz = pat && pat.zone || 1;
   const p = clamp(TUNE.perfectZone * u.s.perfZ * zm * bz, .02, g * .8);
   return { g: g * bz, p };
@@ -58,6 +61,10 @@ function markerSpeed() {
   const u = activeUnit(); let v = TUNE.markerSpeed * (1 + .07 * B.act) * (u ? u.s.mark : 1);
   v *= 1 + .15 * liveFoes().filter(f => f.T.stare).length;
   const pat = bossPat(); if (pat && pat.spd) v *= pat.spd;
+  const bv = unitBar(u);
+  if (bv === 'rage') v *= 1 + Math.min(.4, B.combo * .03);
+  if (bv === 'snipe') { const { g } = zones(); if (Math.abs(B.mk - B.zc) < g / 2) v *= .55; }
+  if (bv === 'frost' && B.slowT > 0) v *= .6;
   return v;
 }
 function switchTo(i) {
@@ -75,14 +82,22 @@ function strike() {
   const u = activeUnit(); if (!u) return;
   if (B.cd > 0) return;
   const { g, p } = zones(), d = Math.abs(B.mk - B.zc);
-  const q = d <= p / 2 ? 'perfect' : d <= g / 2 ? 'good' : 'miss';
+  const bv = unitBar(u);
+  let q = d <= p / 2 ? 'perfect' : d <= g / 2 ? 'good' : 'miss', ward = false;
+  if (bv === 'twin' && q !== 'perfect' && Math.abs(B.mk - B.zc2) <= p / 2) q = 'perfect';
+  if (bv === 'guard' && q === 'miss' && Math.abs(B.mk - B.zw) <= g * .3) { q = 'good'; ward = true; }
   B.cd = u.s.cd * (B.buff.spd > 0 ? .67 : 1);
   B.flash = { q, t: .3, x: B.mk };
   if (q === 'perfect') { save.perfects++; B.streak++; B.perf++; save.bestStreak = Math.max(save.bestStreak, B.streak); }
   else if (q === 'miss') B.streak = 0;
   B.label = { q, t: .7, x: B.mk };
-  B.zc = B.zBase = rnd(.18, .82);
-  if (q === 'miss') { B.barShake = .3; B.crackFx = { x: B.flash.x, t: .7, s: Math.floor(rnd(1000)) }; }
+  B.zc = B.zBase = rnd(.18, .82); rerollBar();
+  if (ward) { B.units.forEach(o => { if (!o.dead) o.guard = 1; }); num(u.x, u.y - 70, 'WARD', COL.blue); B.fx.push({ type: 'ring', x: u.x, y: u.y - 24, t: 0, dur: .4, col: '#a6caff' }); }
+  if (bv === 'frost' && q === 'perfect') B.slowT = 1.2;
+  if (bv === 'heat' && q === 'perfect') B.heat = Math.min(5, B.heat + 1);
+  if (bv === 'heat' && q !== 'miss' && B.heat >= 5 && B.heatArm) { B.heat = 0; B.heatArm = 0; nova(u, 2.5, '#ff7a1a', 'ERUPT'); }
+  else if (bv === 'heat' && B.heat >= 5) B.heatArm = 1;
+  if (q === 'miss') { B.barShake = .3; B.crackFx = { x: B.flash.x, t: .7, s: Math.floor(rnd(1000)) }; B.cd += TUNE.missLock; B.combo = 0; } else B.combo++;
   if (q !== 'miss') save.tut = true;
   attack(u, q, true);
 }
@@ -96,32 +111,51 @@ function attack(u, q, manual) {
   }
   let dmg = u.s.dmg * (q === 'perfect' ? u.s.perfMult : 1);
   if (!manual) dmg *= TUNE.autoDmgMul;
+  if (manual && B.streak >= 2) dmg *= 1 + Math.min(TUNE.chainMax, TUNE.chainStep * B.streak);
+  const mv = unitAtk(u), grp = { slash: 'm', spin: 'm', smite: 'm', blink: 'm', arrow: 'r', fan: 'r', snipe: 'r' }[mv] || 'c', [fx0, fy0] = foeCenter(f);
+  if (grp === 'm') { u.dash = { t: 0, dur: mv === 'blink' ? .18 : manual ? .26 : .22, tx: fx0 - 34 - u.x, ty: f.y - u.y, blink: mv === 'blink' }; dust(u.x, u.y, 5); }
+  else if (grp === 'r') u.kb = manual ? (mv === 'snipe' ? 8 : 5) : 3; else u.cast = .25;
   if (B.buff.dmg > 0) dmg *= 1.25;
+  if (manual && unitBar(u) === 'rage') dmg *= 1 + Math.min(.3, B.combo * .02);
   if (u.s.rage) dmg *= 1 + Math.min(.4, (1 - u.hp / u.max) * .6);
   if (u.s.surge && manual && B.streak >= 5) dmg *= 1 + u.s.surge;
   const crit = Math.random() * 100 < u.s.crit; if (crit) dmg *= u.s.critDmg;
   const info = { q, crit, manual };
   if (manual && q === 'perfect') {
     B.hitstop = .055; B.shake = Math.max(B.shake, 3);
-    if (f.wind > 0) { f.wind = 0; f.timer = f.T.per; SFX.parry(); num(foeCenter(f)[0], foeCenter(f)[1] - 22, 'PARRY!', COL.blue); if (u.s.riposte) dmg *= 1 + u.s.riposte; }
+    if (f.wind > 0 || f.pend) {
+      f.wind = 0; f.pend = null; f.anim = null; f.timer = f.per; SFX.parry(); SFX.clang(); num(fx0, fy0 - 22, 'PARRY!', COL.blue); if (u.s.riposte) dmg *= 1 + u.s.riposte;
+      B.hitstop = .09; B.shake = Math.max(B.shake, 5); B.fx.push({ type: 'ring', x: fx0 - 20, y: fy0, t: 0, dur: .35, col: '#ffffff' });
+      for (let i = 0; i < 14; i++) spark(fx0 - 22, fy0, i % 2 ? COL.gold : '#ffffff', 200);
+    }
     if (u.s.pin) f.timer += u.s.pin;
     if (u.s.guard) u.guard = 1;
   }
-  const atk = CLS[u.id].atk, hs = manual ? SFX[q] : SFX.auto;
-  if (atk === 'slash') {
+  if (manual && q === 'good' && (f.wind > 0 || f.pend)) { if (f.pend) f.pend.dodge = 1; else f.dodge = 1; }
+  if (crit || (manual && q === 'perfect')) { B.impact = crit && manual ? .07 : .045; if (crit && !RM) B.zoom = { t: 0, dur: .2, x: fx0, y: fy0, a: manual ? .09 : .05 }; }
+  const hs = manual ? SFX[q] : SFX.auto, P = manual && q === 'perfect';
+  const after = () => evoAfterHit(u, f, dmg, q, manual);
+  if (grp === 'm') {
     hs(); const [cx, cy] = foeCenter(f);
-    B.fx.push({ type: 'slash', x: cx, y: cy, t: 0, dur: .2, big: q === 'perfect' && manual });
-    hitFoe(f, dmg, info, u);
+    if (mv === 'spin') { for (let k = 0; k < 3; k++) B.fx.push({ type: 'smear', x: cx - 4 + k * 4, y: cy - 6 + k * 6, t: -k * .04, dur: .18, big: true, col: P ? COL.gold : '#ff9a9a', flip: k % 2 === 1 }); B.fx.push({ type: 'ring', x: cx, y: cy, t: 0, dur: .25, col: '#ff6a6a' }); }
+    else if (mv === 'smite') { B.fx.push({ type: 'slash', x: cx, y: cy, t: 0, dur: .2, big: P }); B.fx.push({ type: 'pillar', x: cx, y: f.y, t: 0, dur: P ? .5 : .3, col: u.s.holy ? '#fff0a0' : '#e6e6f0' }); }
+    else if (mv === 'blink') { B.fx.push({ type: 'smear', x: cx, y: cy, t: 0, dur: .12, big: false, col: '#d07aff', flip: false }); B.fx.push({ type: 'smear', x: cx, y: cy + 4, t: -.06, dur: .12, big: false, col: '#ffffff', flip: true }); for (let i = 0; i < 6; i++) spark(u.x, u.y - 24, '#8a2ad0', 60); }
+    else { B.fx.push({ type: 'slash', x: cx, y: cy, t: 0, dur: .2, big: P });
+    B.fx.push({ type: 'smear', x: cx, y: cy, t: 0, dur: .16, big: q === 'perfect' || crit, col: P ? COL.gold : '#ffffff', flip: Math.random() < .5 }); }
+    if (mv === 'blink') { hitFoe(f, dmg * .55, info, u); setTimeout(() => B && hitFoe(f, dmg * .55, { q, manual }, u), 80); } else hitFoe(f, dmg, info, u);
+    after();
+    if (mv === 'spin' && u.s.multi) liveFoes().filter(o => o !== f).forEach(o => hitFoe(o, dmg * u.s.multi, { q: 'splash' }, u));
     if (u.s.cleave && q === 'perfect') liveFoes().filter(o => o !== f).forEach(o => { const [ox, oy] = foeCenter(o); B.fx.push({ type: 'slash', x: ox, y: oy, t: 0, dur: .16 }); hitFoe(o, dmg * u.s.cleave, { q: 'splash' }, u); });
-  } else if (atk === 'arrow') {
+  } else if (grp === 'r') {
     SFX.arrow();
-    shoot(u, f, 'arrow', () => { hs(); hitFoe(f, dmg, info, u); });
+    shoot(u, f, mv === 'snipe' ? 'snipe' : 'arrow', () => { hs(); hitFoe(f, dmg, info, u); after(); });
+    if (mv === 'fan') [-14, 14].forEach((dy, k) => setTimeout(() => B && shoot(u, f, 'arrow', () => hitFoe(f, dmg * .15, { q: 'splash' }, u), dy), 40 + k * 30));
     if (u.s.volley && Math.random() < u.s.volley) { const o = pick(liveFoes()); setTimeout(() => B && shoot(u, o, 'arrow', () => hitFoe(o, dmg * .8, { q: 'good' }, u)), 90); }
     if (u.s.multi) liveFoes().filter(o => o !== f).forEach(o => shoot(u, o, 'arrow', () => hitFoe(o, dmg * u.s.multi, { q: 'splash' }, u)));
   } else {
     SFX.orb();
-    shoot(u, f, u.s.burn ? 'fire' : u.s.chill ? 'ice' : 'orb', () => {
-      hs(); hitFoe(f, dmg, info, u);
+    shoot(u, f, mv === 'void' ? 'dark' : mv === 'fire' || u.s.burn ? 'fire' : mv === 'ice' || u.s.chill ? 'ice' : 'orb', () => {
+      hs(); hitFoe(f, dmg, info, u); after();
       const [cx, cy] = foeCenter(f);
       B.fx.push({ type: 'ring', x: cx, y: cy, t: 0, dur: .3, col: u.s.burn ? '#ff9a3a' : u.s.chill ? '#9fe6f4' : '#9a8cff' });
       liveFoes().filter(o => o !== f).forEach(o => hitFoe(o, dmg * u.s.splash, { q: 'splash', manual }, u));
@@ -129,9 +163,28 @@ function attack(u, q, manual) {
     });
   }
 }
-function shoot(u, f, kind, cb) {
+function shoot(u, f, kind, cb, dy = 0) {
   const [x, y] = unitCenter(u);
-  B.proj.push({ x: x + 14, y, f, kind, cb, sp: kind === 'arrow' ? 520 : 340, t: 0 });
+  B.proj.push({ x: x + 14, y: y + dy, f, kind, cb, sp: kind === 'snipe' ? 900 : kind === 'arrow' ? 520 : 340, t: 0, tr: [] });
+}
+function nova(u, mult, col, label) {
+  const [ux, uy] = unitCenter(u); B.fx.push({ type: 'nova', x: ux, y: uy, t: 0, dur: .5, col }); B.shake = Math.max(B.shake, 5); SFX.lvl();
+  num(ux, uy - 46, label, col, 2);
+  liveFoes().forEach(o => { const [cx, cy] = foeCenter(o); B.fx.push({ type: 'ring', x: cx, y: cy, t: 0, dur: .35, col }); hitFoe(o, u.s.dmg * mult, { q: 'perfect', manual: true }, u); });
+}
+// evolution abilities that trigger after a hit lands
+function evoAfterHit(u, f, dmg, q, manual) {
+  if (!B) return; const s = u.s, P = manual && q === 'perfect', [cx, cy] = foeCenter(f);
+  if (s.bleed && !f.dead) { f.burnT = 3; f.burnDps = Math.max(f.burnDps, dmg * s.bleed / 3); f.bleed = 1; }
+  if (s.pet && Math.random() < s.pet) setTimeout(() => { if (!B || f.dead) return; B.fx.push({ type: 'smear', x: cx - 6, y: cy + 8, t: 0, dur: .14, big: false, col: '#b4b4c4', flip: true }); num(cx - 14, cy + 10, 'wolf', '#b4b4c4'); hitFoe(f, dmg * .5, { q: 'good' }, u); }, 140);
+  if (s.zap && Math.random() < s.zap) liveFoes().filter(o => o !== f).forEach(o => { const [ox, oy] = foeCenter(o); B.fx.push({ type: 'zap', x: cx, y: cy, x2: ox, y2: oy, t: 0, dur: .22, col: s.chill ? '#e8ffff' : '#a6caff' }); hitFoe(o, dmg * .4, { q: 'splash' }, u); });
+  if (!P) return;
+  if (s.healP) B.units.forEach(o => { if (!o.dead) { const h = Math.round(o.max * s.healP); o.hp = Math.min(o.max, o.hp + h); if (h) num(o.x + 8, o.y - 60, '+' + h, COL.green); } });
+  if (s.exec && !f.dead && f.hp / f.max < s.exec && !(B.boss && B.boss.f === f)) { num(cx, cy - 26, 'EXECUTE', COL.red); hitFoe(f, f.hp + 1, { q: 'perfect', manual: true }, u); }
+  if (s.rally) { B.buff.dmg = Math.max(B.buff.dmg, s.rally); num(u.x, u.y - 72, 'RALLY', COL.gold); }
+  if (s.echo) setTimeout(() => { if (B && !f.dead) { num(cx, cy - 30, 'echo', '#e8ffff'); hitFoe(f, dmg * s.echo, { q: 'good' }, u); } }, 180);
+  if (s.nova) { B.novaC[u.id] = (B.novaC[u.id] || 0) + 1; if (B.novaC[u.id] >= s.nova) { B.novaC[u.id] = 0; nova(u, s.novaM, s.holy ? '#fff0a0' : s.burn ? '#ff7a1a' : '#d6a6ff', 'NOVA'); } }
+  if (s.shieldAll) { B.shC[u.id] = (B.shC[u.id] || 0) + 1; if (B.shC[u.id] >= s.shieldAll) { B.shC[u.id] = 0; B.units.forEach(o => { if (!o.dead) o.guard = 1; }); num(u.x, u.y - 72, 'SHIELD', COL.blue); } }
 }
 function hitFoe(f, dmg, info, u) {
   if (!f || f.dead) return;
@@ -139,12 +192,14 @@ function hitFoe(f, dmg, info, u) {
   if (f.T.ghost && info.q === 'good') dmg *= .5;
   if (f.T.plated && info.q === 'good') dmg *= .6;
   dmg = Math.max(1, Math.round(dmg));
-  f.hp -= dmg; f.flash = B.boss && B.boss.f === f ? (info.manual ? .06 : Math.max(f.flash, 0)) : .09; f.kx = info.q === 'perfect' ? 8 : info.q === 'splash' ? 2 : 4;
+  f.hp -= dmg; const isB = B.boss && B.boss.f === f; f.flash = isB ? (info.manual ? .06 : Math.max(f.flash, 0)) : .09;
+  const str = clamp(dmg / f.max * (isB ? 12 : 3), 0, 1); f.kx = Math.round((info.q === 'splash' ? 2 : 4) + str * (isB ? 6 : 16) + (info.q === 'perfect' ? 4 : 0));
+  if (info.manual) B.shake = Math.max(B.shake, 1.5 + str * 6 + (info.crit ? 2 : 0));
   const [cx, cy] = foeCenter(f);
   const col = info.q === 'perfect' ? COL.gold : info.crit ? '#ff9a6a' : info.q === 'splash' ? COL.dim : COL.white;
   num(cx + rnd(-6, 6), cy - 10, (info.crit ? dmg + '!' : '' + dmg), col, info.q === 'perfect' && info.manual ? 2 : 1);
   const n = info.q === 'perfect' ? 16 : info.q === 'splash' ? 3 : 7;
-  const mr = SPR[f.spr][Math.floor(SPR[f.spr].length / 2)].replace(/\./g, ''), mc = PAL[mr[Math.floor(mr.length / 2)]] || '#fff';
+  let mc = '#fff'; if (SPR[f.spr]) { const mr = SPR[f.spr][Math.floor(SPR[f.spr].length / 2)].replace(/\./g, ''); mc = PAL[mr[Math.floor(mr.length / 2)]] || '#fff'; } else if (isB) mc = B.boss.D.crack;
   for (let i = 0; i < n; i++) spark(cx, cy, i % 2 ? '#ffffff' : (info.q === 'perfect' ? COL.gold : mc), info.q === 'perfect' ? 150 : 90);
   if (u && u.s.steal) u.hp = Math.min(u.max, u.hp + dmg * u.s.steal);
   if (u && u.s.chill) { f.chill = 3; if (info.q === 'perfect' && info.manual) { f.freeze = u.s.freeze; f.wind = 0; } }
@@ -152,7 +207,7 @@ function hitFoe(f, dmg, info, u) {
   if (f.hp <= 0) killFoe(f);
 }
 function killFoe(f) {
-  f.hp = 0; f.dead = true; shatter(f.spr, foeCenter(f)[0], f.y - (f.T.fly ? 10 : 0), f.sc, f.T.outline); SFX.kill();
+  f.hp = 0; f.dead = true; f.pend = null; if (SPR[f.spr]) shatter(f.spr, foeCenter(f)[0], f.y - (f.T.fly ? 10 : 0), f.sc, f.T.outline); else bossShatter(f); SFX.kill();
   bossKilled(f);
   B.shake = Math.max(B.shake, f.T.boss ? 7 : 2.5);
   if (f.T.revive && !f.revived) { f.reviveT = 1.3; return; }
@@ -168,7 +223,9 @@ function killFoe(f) {
   const lastOne = B.wave === 2 && !liveFoes().length && !B.foes.some(o => o.reviveT > 0);
   if (f.T.boss || lastOne || Math.random() < TUNE.dropChance) {
     const it = makeItem(f.L + (Math.random() < .3 ? 1 : 0), null, pick(save.party), f.T.boss ? 1 : 0, f.T.boss ? .6 : .1 * B.act);
-    if (save.inv.length >= TUNE.invMax) { save.scrap += it.rar + 1; num(foeCenter(f)[0], f.y - 40, 'scrapped', COL.dim); }
+    const [dx0, dy0] = foeCenter(f);
+    if (save.autoScrap && isWorse(it)) { it.scrapped = true; save.scrap += it.rar + 1; setTimeout(() => B && num(dx0, dy0 - 30, 'scrapped +' + (it.rar + 1), COL.dim), 500); }
+    else if (save.inv.length >= TUNE.invMax) { it.scrapped = true; save.scrap += it.rar + 1; num(dx0, f.y - 40, 'bag full +' + (it.rar + 1), COL.dim); }
     else save.inv.push(it);
     B.loot.push(it); B.fx.push({ type: 'drop', it, x: foeCenter(f)[0], y: foeCenter(f)[1], t: 0, dur: 1.2 });
     setTimeout(SFX.drop, 120);
@@ -176,7 +233,7 @@ function killFoe(f) {
 }
 function foeAttack(f, second) {
   f.atk++; f.lt = .2;
-  const pat = B.boss && B.boss.f === f ? bossPat() || {} : {};
+  const boss = B.boss && B.boss.f === f, pat = boss ? bossPat() || {} : {};
   if (pat.dbl && !second) f.dbl = .3;
   const alive = B.units.filter(u => !u.dead); if (!alive.length) return;
   const sl = pat.slam || f.T.slam, slam = sl && f.atk % sl === 0;
@@ -187,16 +244,35 @@ function foeAttack(f, second) {
     let t = alive[0]; for (let i = 0; i < alive.length; i++) { r -= w[i]; if (r <= 0) { t = alive[i]; break; } }
     targets = [t];
   }
-  if (slam) num(...foeCenter(f), 'SLAM', COL.red);
-  for (const u of targets) {
-    let d = f.dmg * rnd(.9, 1.1) * (slam ? .7 : 1) * 30 / (30 + u.s.arm);
+  const kind = boss ? 'boss' : f.T.atk || 'lunge', t0 = targets[0], [cx, cy] = foeCenter(f);
+  const delay = { leap: .2, lunge: .11, dive: .15, shoot: .26, boss: .16 }[kind] || .12;
+  f.pend = { targets, slam, t: delay, dodge: f.dodge }; f.dodge = 0;
+  f.anim = { kind, t: 0, hit: delay, dur: delay + .24, tx: t0.x + 30 - f.x, ty: t0.y - f.y };
+  if (kind === 'shoot') B.eproj.push({ x: cx - 8, y: cy, tx: t0.x + 6, ty: t0.y - 24, t: 0, dur: delay, pk: f.T.pk });
+  if (kind === 'leap' || kind === 'lunge') dust(f.x, f.y, 4);
+  if (boss) bossAttackFx(f, targets, slam);
+  if (slam) num(cx, cy - 20, 'SLAM', COL.red);
+}
+function foeHit(f) {
+  const P = f.pend; f.pend = null; if (!P) return;
+  let any = false;
+  for (const u of P.targets) {
+    if (u.dead) continue; any = true;
+    if (u.s.dodge && Math.random() < u.s.dodge) { u.hop = .32; num(u.x - 10, u.y - 64, 'evade', COL.green); continue; }
+    if (u.aegis) { u.aegis = 0; num(u.x, u.y - 64, 'AEGIS', '#a6caff'); B.fx.push({ type: 'ring', x: u.x, y: u.y - 24, t: 0, dur: .35, col: '#a6caff' }); SFX.clang(); continue; }
+    let d = f.dmg * rnd(.9, 1.1) * (P.slam ? .7 : 1) * 30 / (30 + u.s.arm);
+    if (P.dodge) { d *= .4; u.hop = .32; num(u.x - 10, u.y - 64, 'dodge', COL.green); }
     if (u.guard) { d *= .5; u.guard = 0; num(u.x, u.y - 64, 'guard', COL.blue); }
-    d = Math.max(1, Math.round(d)); u.hp -= d; u.hurt = .22;
-    num(u.x + rnd(-5, 5), u.y - 54, '-' + d, COL.red);
-    for (let i = 0; i < 6; i++) spark(u.x, u.y - 24, i % 2 ? '#ff5a5a' : '#ffffff', 80);
+    d = Math.max(1, Math.round(d)); u.hp -= d;
+    if (u.s.thorns && !f.dead) hitFoe(f, d * u.s.thorns * 2, { q: 'splash' }, u); u.hurt = .22; u.kb = Math.max(u.kb, P.dodge ? 2 : 7);
+    num(u.x + rnd(-5, 5), u.y - 54, '-' + d, COL.red, d > u.max * .2 ? 2 : 1);
+    for (let i = 0; i < 8; i++) spark(u.x, u.y - 24, i % 2 ? '#ff5a5a' : '#ffffff', 100);
+    dust(u.x, u.y, 3);
+    if (u.id === save.active) B.combo = 0;
     if (u.hp <= 0) unitDie(u);
   }
-  SFX.hurt(); B.shake = Math.max(B.shake, slam ? 5 : 2.5);
+  if (!any) return;
+  SFX.hurt(); B.shake = Math.max(B.shake, P.slam ? 6 : 3);
   for (const g of save.goblets) {
     if (B.gobUsed[g]) continue; const G = GOBLETS[g];
     if (B.units.some(u => !u.dead && u.hp / u.max < G.th)) {
@@ -205,7 +281,9 @@ function foeAttack(f, second) {
     }
   }
 }
+function dust(x, y, n) { for (let i = 0; i < n; i++) B.parts.push({ x: x + rnd(-8, 8), y: y - 1, vx: rnd(-40, 40), vy: rnd(-24, -6), t: 0, life: rnd(.3, .55), col: pick(ACTPAL[B.act].dust), s: Math.random() < .5 ? 2 : 1, g: 30 }); }
 function unitDie(u) {
+  if (u.s.revive && (u.revUsed || 0) < u.s.revive) { u.revUsed = (u.revUsed || 0) + 1; u.hp = Math.round(u.max * .4); B.fx.push({ type: 'nova', x: u.x, y: u.y - 24, t: 0, dur: .6, col: '#ffb03a' }); num(u.x, u.y - 70, 'REBORN', '#ffb03a', 2); SFX.lvl(); return; }
   u.hp = 0; u.dead = true; shatter(u.spr, u.x, u.y, PSC);
   if (u.id === save.active) { const nx = B.units.find(x => !x.dead); if (nx) { save.active = nx.id; } }
   if (B.units.every(x => x.dead)) { B.state = 'lose'; B.st = 1.2; SFX.lose(); persist(); }
@@ -255,14 +333,25 @@ function updateBattle(dt) {
   B.shake = Math.max(0, B.shake - dt * 30); B.quake = Math.max(0, B.quake - dt * 22); B.barShake = Math.max(0, B.barShake - dt);
   if (B.crackFx) { B.crackFx.t -= dt; if (B.crackFx.t <= 0) B.crackFx = null; }
   // movement / anim decay
-  for (const u of B.units) { u.ox += (0 - u.ox) * Math.min(1, dt * 8); u.lt = Math.max(0, u.lt - dt); u.hurt = Math.max(0, u.hurt - dt); }
-  for (const f of B.foes) { f.ox += (0 - f.ox) * Math.min(1, dt * 7); f.kx += (0 - f.kx) * Math.min(1, dt * 14); f.flash -= dt; f.lt = Math.max(0, f.lt - dt); }
+  const shf = B.boss ? B.boss.exp * .25 : 0;
+  for (const u of B.units) {
+    u.ox += (0 - u.ox) * Math.min(1, dt * 8); u.lt = Math.max(0, u.lt - dt); u.hurt = Math.max(0, u.hurt - dt); u.x = u.bx - shf;
+    if (u.dash) { u.dash.t += dt; if (u.dash.t >= u.dash.dur) u.dash = null; }
+    u.hop = Math.max(0, u.hop - dt); u.cast = Math.max(0, u.cast - dt); u.kb += (0 - u.kb) * Math.min(1, dt * 12);
+  }
+  for (const f of B.foes) {
+    f.ox += (0 - f.ox) * Math.min(1, dt * 7); f.kx += (0 - f.kx) * Math.min(1, dt * 14); f.flash -= dt; f.lt = Math.max(0, f.lt - dt);
+    if (f.anim) { f.anim.t += dt; if (f.anim.t >= f.anim.dur) f.anim = null; }
+  }
+  if (B.boss && B.boss.f && !B.boss.f.dead) B.boss.f.x = BOSS_POS[0] + shf * .4;
+  B.impact = Math.max(0, B.impact - dt); if (B.zoom) { B.zoom.t += dt; if (B.zoom.t >= B.zoom.dur) B.zoom = null; }
+  for (const e of B.eproj) e.t += dt; B.eproj = B.eproj.filter(e => e.t < e.dur);
   for (const p of B.parts) { p.t += dt; p.vy += p.g * dt; p.x += p.vx * dt; p.y += p.vy * dt; }
   B.parts = B.parts.filter(p => p.t < p.life);
   for (const n of B.nums) n.t += dt; B.nums = B.nums.filter(n => n.t < .9);
   for (const e of B.fx) e.t += dt; B.fx = B.fx.filter(e => e.t < e.dur);
   for (const p of B.proj) {
-    p.t += dt; const [tx, ty] = foeCenter(p.f), dx = tx - p.x, dy = ty - p.y, d = Math.hypot(dx, dy);
+    p.t += dt; p.tr.unshift([p.x, p.y]); if (p.tr.length > 5) p.tr.pop(); const [tx, ty] = foeCenter(p.f), dx = tx - p.x, dy = ty - p.y, d = Math.hypot(dx, dy);
     if (d < 8 || p.t > 1) { p.done = true; p.cb(); continue; }
     p.x += dx / d * p.sp * dt; p.y += dy / d * p.sp * dt;
     if (p.kind !== 'arrow' && Math.random() < .6) B.parts.push({ x: p.x, y: p.y, vx: rnd(-10, 10), vy: rnd(-10, 10), t: 0, life: .25, col: p.kind === 'fire' ? '#ff9a3a' : p.kind === 'ice' ? '#9fe6f4' : '#9a8cff', s: 1, g: 0 });
@@ -283,7 +372,7 @@ function updateBattle(dt) {
   B.mk += B.md * markerSpeed() * dt;
   if (B.mk > 1) { B.mk = 2 - B.mk; B.md = -1; } if (B.mk < 0) { B.mk = -B.mk; B.md = 1; }
   if (B.state !== 'fight') return;
-  B.cd = Math.max(0, B.cd - dt);
+  B.cd = Math.max(0, B.cd - dt); B.slowT = Math.max(0, B.slowT - dt);
   for (const k in B.buff) B.buff[k] = Math.max(0, B.buff[k] - dt);
   if (!activeUnit()) { const nx = B.units.find(u => !u.dead); if (nx) save.active = nx.id; }
   // party
@@ -293,7 +382,7 @@ function updateBattle(dt) {
     if (B.buff.heal > 0) u.hp = Math.min(u.max, u.hp + u.max * .1 * dt);
     if (u.id === save.active) continue;
     u.atkT -= dt * (B.buff.spd > 0 ? 1.5 : 1);
-    if (u.atkT <= 0 && liveFoes().length) { u.atkT = u.s.cd * TUNE.autoCdMul * rnd(.9, 1.1); attack(u, Math.random() < .12 ? 'perfect' : 'good', false); }
+    if (u.atkT <= 0 && liveFoes().length) { u.atkT = u.s.cd * TUNE.autoCdMul * rnd(.9, 1.1); attack(u, Math.random() < .1 ? 'perfect' : 'good', false); }
   }
   // foes
   for (const f of B.foes) {
@@ -306,12 +395,13 @@ function updateBattle(dt) {
       if (Math.random() < .3) { const [cx, cy] = foeCenter(f); B.parts.push({ x: cx + rnd(-8, 8), y: cy + rnd(-4, 8), vx: 0, vy: -30, t: 0, life: .4, col: Math.random() < .5 ? '#ff9a3a' : '#ffe08a', s: 1, g: -20 }); }
       if (f.burnAcc >= 1 && !f.inv) { const d = Math.floor(f.burnAcc); f.burnAcc -= d; f.hp -= d; bossPhaseCheck(f); if (f.hp <= 0) { killFoe(f); continue; } }
     }
+    if (f.pend && !f.inv) { f.pend.t -= dt; if (f.pend.t <= 0) foeHit(f); if (B.state !== 'fight') return; }
     if (f.inv) continue;
     if (f.freeze > 0) { f.freeze -= dt; continue; }
     const bp = B.boss && B.boss.f === f ? bossPat() || {} : {};
-    const rate = f.chill > 0 ? .6 : 1; f.chill -= dt;
-    if (f.wind > 0) { f.wind -= dt * rate; if (f.wind <= 0) { f.wind = 0; foeAttack(f); f.timer = f.T.per * (bp.per || 1) * rnd(.85, 1.15); } }
-    else { f.timer -= dt * rate; if (f.timer <= 0) { f.wind = f.T.wind * (bp.wind || 1); SFX.wind(); } }
+    const slow = Math.min(.5, B.units.reduce((a, u) => u.dead ? a : Math.max(a, u.s.slow || 0), 0)), rate = (f.chill > 0 ? .6 : 1) * (1 - slow); f.chill -= dt;
+    if (f.wind > 0) { f.wind -= dt * rate; if (f.wind <= 0) { f.wind = 0; foeAttack(f); f.timer = f.per * (bp.per || 1) * rnd(.85, 1.15); } }
+    else { f.timer -= dt * rate; if (f.timer <= 0) { f.wind = f.windMax = f.T.wind * (bp.wind || 1); SFX.wind(); } }
     if (B.state !== 'fight') return;
   }
   if (!liveFoes().length && !B.foes.some(f => f.reviveT > 0) && !B.proj.length && B.state === 'fight' && (!B.boss || B.boss.st === 'done')) {
