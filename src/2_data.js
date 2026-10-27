@@ -195,20 +195,35 @@ function newChar(id, lvl) {
 function newSave() {
   save = { v: 1, unlocked: 0, cleared: Array(12).fill(false), sel: 0, perfects: 0, bestStreak: 0, kills: 0, party: ['warrior'], active: 'warrior',
     chars: { warrior: newChar('warrior', 1) }, inv: [], scrap: 0, goblets: [], act4: false, mute: false, nextId: 1, bestLvl: 1, tut: false, started: false, autoScrap: false };
-  const sw = makeItem(1, 'weapon', 'warrior'); sw.rar = 0; sw.mods = { dmg: 2 }; sw.look = 0; sw.lk = 0; sw.name = 'Iron Shortsword'; save.chars.warrior.gear.weapon = sw;
+  save.cls = null; giveStarter('warrior');
   return save;
+}
+// the one hero of this save: chosen on the class select screen and locked
+function giveStarter(id) {
+  save.chars = { [id]: newChar(id, 1) }; save.party = [id]; save.active = id;
+  const sw = makeItem(1, 'weapon', id); sw.rar = 0; sw.mods = { dmg: 2 }; sw.look = 0; sw.lk = 0; sw.name = { warrior: 'Iron Shortsword', archer: 'Ash Shortbow', mage: 'Oak Wand' }[id]; save.chars[id].gear.weapon = sw;
+}
+function chooseClass(id) {
+  const m = save.mute; newSave(); save.mute = m; giveStarter(id); save.cls = id; save.started = true; persist();
 }
 function loadSave() {
   try { const s = JSON.parse(localStorage.getItem(SAVE_KEY)); if (s && s.v === 1 && s.chars) { save = s; for (const id in s.chars) for (const sl of SLOTS) if (s.chars[id].gear[sl] === undefined) s.chars[id].gear[sl] = null; if (s.autoScrap === undefined) s.autoScrap = false;
       for (const id in s.chars) { const c = s.chars[id]; delete c.st; delete c.stp; delete c.sp; c.seen = c.seen || []; for (const sl of SLOTS) { const it = c.gear[sl]; if (it && !it.cls) it.cls = id; } }
       for (const it of s.inv) if (!it.cls) it.cls = pick(s.party);
+      // solo migration: keep one hero (the warrior if present), scrap gear for the others
+      if (s.cls === undefined) { s.cls = s.chars.warrior ? 'warrior' : s.party[0]; s.started = true; }
+      if (s.cls) {
+        for (const id of Object.keys(s.chars)) if (id !== s.cls) delete s.chars[id];
+        s.party = [s.cls]; s.active = s.cls;
+        s.inv = s.inv.filter(it => { if (it.cls === s.cls) return true; s.scrap += it.rar + 1; return false; });
+      }
       return true; } } catch (e) {}
   newSave(); return false;
 }
 function persist() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) {} }
 const xpNeed = l => Math.round(10 + 6 * l * l);
 function addChar(id) {
-  if (save.party.includes(id)) return;
+  return; // solo: no recruits
   const lvl = Math.max(1, save.chars.warrior.lvl - 1);
   const c = newChar(id, lvl); save.chars[id] = c; save.party.push(id);
   const w = makeItem(Math.max(1, save.bestLvl - 1), 'weapon', id); w.rar = 1; c.gear.weapon = w;

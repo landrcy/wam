@@ -9,7 +9,7 @@ function startLevel(li) {
   const n = save.party.length;
   B = { li, act: Math.floor(li / 3), wave: 0, foes: [], units: [], t: 0, mk: 0, md: 1, zc: .5, cd: 0, state: 'intro', st: 1.0,
     fx: [], parts: [], nums: [], proj: [], shake: 0, hitstop: 0, loot: [], xp: 0, streak: 0, perf: 0, target: 0,
-    buff: { dmg: 0, spd: 0, heal: 0 }, gobUsed: {}, label: null, flash: null, banner: null, paused: false, msgs: [], quake: 0, zBase: .5, boss: null, trail: [], heat: 0, slowT: 0, zc2: .2, zw: .8, novaC: {}, shC: {}, crackFx: null, barShake: 0, eproj: [], combo: 0, impact: 0, zoom: null, dust: [] };
+    buff: { dmg: 0, spd: 0, heal: 0 }, gobUsed: {}, label: null, flash: null, banner: null, paused: false, msgs: [], quake: 0, zBase: .5, boss: null, trail: [], heat: 0, slowT: 0, zc2: .2, zw: .8, drawing: false, drawT: 0, tapMode: false, over: 0, runes: [], runeQ: [], novaC: {}, shC: {}, crackFx: null, barShake: 0, eproj: [], combo: 0, impact: 0, zoom: null, dust: [] };
   B.units = save.party.map((id, i) => {
     const c = save.chars[id], s = calcStats(c), [x, y] = PPOS[n][i];
     return { id, c, s, hp: s.hp, max: s.hp, x, y, bx: x, ox: -60, lt: 0, hurt: 0, atkT: rnd(.4, 1.2), dead: false, guard: 0, spr: charSpr(c), dash: null, hop: 0, kb: 0, cast: 0, seed: i * 1.7 };
@@ -17,7 +17,7 @@ function startLevel(li) {
   const bar = B.units.reduce((a, u) => a + (u.s.barrier || 0), 0);
   B.units.forEach(u => u.s.arm += bar);
   if (!save.party.includes(save.active)) save.active = save.party[0];
-  spawnWave(0); rerollBar();
+  spawnWave(0); newTarget();
   scene = 'battle';
   banner(ACTS[B.act].roman + '-' + (li % 3 + 1) + '  ' + LEVELS[li].n, ACTS[B.act].c, 1.4);
 }
@@ -25,8 +25,8 @@ function spawnWave(w) {
   const keys = LEVELS[B.li].w[w], n = keys.length;
   B.foes = keys.map((k, i) => {
     const T = FOES[k], L = B.li + 1, [x, y] = FPOS[n][i];
-    const hp = Math.round(TUNE.foeHp * Math.pow(TUNE.foeHpGrow, L - 1) * T.hp * (T.boss ? TUNE.bossHp : 1));
-    return { k, T, L, hp, max: hp, dmg: TUNE.foeDmg * Math.pow(TUNE.foeDmgGrow, L - 1) * T.dmg, timer: T.per * TUNE.foeRate * rnd(.7, 1.1) + .9, wind: 0, per: T.per * TUNE.foeRate, pend: null, anim: null, dodge: 0,
+    const hp = Math.round(TUNE.foeHp * Math.pow(TUNE.foeHpGrow, L - 1) * T.hp * (T.boss ? TUNE.bossHp : 1) * TUNE.soloHp * (TUNE.soloCls[save.cls] || [1])[0]);
+    return { k, T, L, hp, max: hp, dmg: TUNE.foeDmg * Math.pow(TUNE.foeDmgGrow, L - 1) * T.dmg * TUNE.soloDmg * (TUNE.soloCls[save.cls] || [1, 1])[1], timer: T.per * TUNE.foeRate * rnd(.7, 1.1) + .9, wind: 0, per: T.per * TUNE.foeRate, pend: null, anim: null, dodge: 0,
       x, y, spr: T.spr, sc: T.sc, ox: 90 + i * 12, flash: 0, kx: 0, dead: false, burnT: 0, burnDps: 0, burnAcc: 0, chill: 0, freeze: 0, lt: 0, atk: 0, reviveT: 0, seed: rnd(10) };
   });
   B.target = B.foes.findIndex(f => f.T.boss) >= 0 ? B.foes.findIndex(f => f.T.boss) : 0;
@@ -37,6 +37,35 @@ function spawnWave(w) {
 }
 function unitAtk(u) { return evoField(u.c, 'atk', CLS[u.id].atk); }
 function unitBar(u) { return u ? evoField(u.c, 'bar', null) : null; }
+// each class has its own timing mechanic: warrior sword bar, archer bow draw (hold + release), mage rune circle
+const MECH = { warrior: 'sword', archer: 'bow', mage: 'rune' };
+const mechOf = u => u ? MECH[u.id] || 'sword' : 'sword';
+const circD = (a, b) => { const d = Math.abs(a - b) % 1; return Math.min(d, 1 - d); };
+function aimD() { const u = activeUnit(); return mechOf(u) === 'rune' ? circD(B.mk, B.zc) : Math.abs(B.mk - B.zc); }
+function newTarget() {
+  const m = mechOf(activeUnit());
+  if (m === 'bow') { B.zc = B.zBase = rnd(.45, .88); B.zc2 = B.zc > .66 ? B.zc - rnd(.2, .28) : Math.min(.96, B.zc + rnd(.16, .24)); B.drawing = false; B.tapMode = false; B.over = 0; B.mk = 0; B.md = 1; return; }
+  if (m === 'rune') {
+    const n = Math.random() < .15 + .07 * B.act ? 3 : Math.random() < .35 ? 2 : 1; let a = B.mk + B.md * rnd(.15, .3); B.runes = [];
+    for (let i = 0; i < n; i++) { B.runes.push(((a % 1) + 1) % 1); a += B.md * rnd(.14, .2); }
+    B.runeQ = []; B.zc = B.zBase = B.runes[0]; return;
+  }
+  B.zc = B.zBase = rnd(.18, .82); rerollBar();
+}
+function pressJ() {
+  if (!B || B.state !== 'fight' || B.paused) return;
+  const u = activeUnit(); if (!u) return;
+  if (mechOf(u) !== 'bow') return strike();
+  if (B.cd > 0) return;
+  if (!B.drawing) { B.drawing = true; B.drawT = B.t; B.tapMode = false; B.over = 0; B.mk = 0; SFX.click(); }
+  else if (B.tapMode) bowRelease();
+}
+function releaseJ() {
+  if (!B || !B.drawing || B.tapMode) return;
+  if (B.t - B.drawT < .15) { B.tapMode = true; return; }   // a quick tap: keep drawing, tap again to loose
+  bowRelease();
+}
+function bowRelease() { if (!B.drawing) return; strike(); }
 function rerollBar() { B.zc2 = B.zc < .5 ? rnd(Math.min(.86, B.zc + .3), .88) : rnd(.12, Math.max(.14, B.zc - .3)); B.zw = B.zc < .5 ? rnd(Math.min(.86, B.zc + .25), .88) : rnd(.12, Math.max(.14, B.zc - .25)); }
 const activeUnit = () => B.units.find(u => u.id === save.active && !u.dead);
 const liveFoes = () => B.foes.filter(f => !f.dead);
@@ -70,7 +99,7 @@ function markerSpeed() {
 function switchTo(i) {
   if (!B || B.state === 'win' || B.state === 'lose') return;
   const u = B.units[i]; if (!u || u.dead || u.id === save.active) return;
-  save.active = u.id; SFX.click(); B.cd = Math.max(B.cd, .15);
+  save.active = u.id; SFX.click(); B.cd = Math.max(B.cd, .15); newTarget();
   B.fx.push({ type: 'ring', x: u.x, y: u.y - 24, t: 0, dur: .3, col: '#ffffff' });
 }
 function cycleUnit() {
@@ -81,17 +110,26 @@ function strike() {
   if (!B || B.state !== 'fight' || B.paused) return;
   const u = activeUnit(); if (!u) return;
   if (B.cd > 0) return;
-  const { g, p } = zones(), d = Math.abs(B.mk - B.zc);
+  const { g, p } = zones(), d = aimD(), mech = mechOf(u);
+  if (mech === 'bow' && !B.drawing) return;
   const bv = unitBar(u);
   let q = d <= p / 2 ? 'perfect' : d <= g / 2 ? 'good' : 'miss', ward = false;
   if (bv === 'twin' && q !== 'perfect' && Math.abs(B.mk - B.zc2) <= p / 2) q = 'perfect';
+  if (mech === 'bow') { B.drawing = false; B.tapMode = false; SFX.click(); }
+  if (mech === 'rune' && q !== 'miss') {
+    B.runeQ.push(q);
+    if (B.runeQ.length < B.runes.length) {   // light this rune, aim for the next one
+      B.zc = B.zBase = B.runes[B.runeQ.length]; B.flash = { q, t: .3, x: B.mk }; B.label = { q, t: .5, x: B.mk, rune: B.runeQ.length + '/' + B.runes.length }; SFX.click(); return;
+    }
+    q = B.runeQ.every(x => x === 'perfect') ? 'perfect' : 'good';
+  }
   if (bv === 'guard' && q === 'miss' && Math.abs(B.mk - B.zw) <= g * .3) { q = 'good'; ward = true; }
   B.cd = u.s.cd * (B.buff.spd > 0 ? .67 : 1);
   B.flash = { q, t: .3, x: B.mk };
   if (q === 'perfect') { save.perfects++; B.streak++; B.perf++; save.bestStreak = Math.max(save.bestStreak, B.streak); }
   else if (q === 'miss') B.streak = 0;
   B.label = { q, t: .7, x: B.mk };
-  B.zc = B.zBase = rnd(.18, .82); rerollBar();
+  newTarget();
   if (ward) { B.units.forEach(o => { if (!o.dead) o.guard = 1; }); num(u.x, u.y - 70, 'WARD', COL.blue); B.fx.push({ type: 'ring', x: u.x, y: u.y - 24, t: 0, dur: .4, col: '#a6caff' }); }
   if (bv === 'frost' && q === 'perfect') B.slowT = 1.2;
   if (bv === 'heat' && q === 'perfect') B.heat = Math.min(5, B.heat + 1);
@@ -307,11 +345,11 @@ function winLevel() {
   save.cleared[li] = true;
   save.unlocked = Math.max(save.unlocked, Math.min(11, li + 1));
   const msgs = [];
-  if (first && li === 2) { save.goblets.push('blue'); addChar('archer'); msgs.push({ title: 'An Archer joins!', spr: 'archer', col: '#5fae5f', lines: ['Fast shots from the back row.', 'Press 1 2 3 (or tap a portrait) to', 'choose who you control. The others', 'auto-attack.', '', 'Found the Blue Goblet.'] }); }
-  if (first && li === 5) { save.goblets.push('green'); addChar('mage'); msgs.push({ title: 'A Mage joins!', spr: 'mage', col: '#7a8cff', lines: ['Slow blasts that splash every foe.', '', 'Found the Green Goblet.'] }); }
+  if (first && li === 2) { save.goblets.push('blue'); msgs.push({ title: 'Blue Goblet', char: save.chars[save.cls], col: '#5a8cff', lines: ['Found the Blue Goblet.'] }); }
+  if (first && li === 5) { save.goblets.push('green'); msgs.push({ title: 'Green Goblet', char: save.chars[save.cls], col: '#5fd06a', lines: ['Found the Green Goblet.'] }); }
   if (first && li === 8) {
     save.goblets.push('red');
-    msgs.push({ title: 'Act III cleared', spr: 'warrior', col: COL.gold, lines: ['The Black Keep falls silent.', 'Found the Red Goblet.', '', 'But something stirs beyond the keep...', 'The void hungers for perfection.'] });
+    msgs.push({ title: 'Act III cleared', char: save.chars[save.cls], col: COL.gold, lines: ['The Black Keep falls silent.', 'Found the Red Goblet.', '', 'But something stirs beyond the keep...', 'The void hungers for perfection.'] });
   }
   if (act4Ready() && !save.act4) { save.act4 = true; msgs.push({ title: 'A void opens', spr: 'shade', col: '#b480ff', lines: ['Your ' + TUNE.act4Perfects + ' perfect strikes tore the sky.', 'Secret Act IV: The Void is open.'] }); }
   if (first && li === 11) msgs.push({ title: 'The reflection breaks', spr: 'mirror', col: '#ffffff', lines: ['You beat the secret act.', 'Thanks for testing W.A.M.!'] });
@@ -344,7 +382,7 @@ function updateBattle(dt) {
     f.ox += (0 - f.ox) * Math.min(1, dt * 7); f.kx += (0 - f.kx) * Math.min(1, dt * 14); f.flash -= dt; f.lt = Math.max(0, f.lt - dt);
     if (f.anim) { f.anim.t += dt; if (f.anim.t >= f.anim.dur) f.anim = null; }
   }
-  if (B.boss && B.boss.f && !B.boss.f.dead) B.boss.f.x = BOSS_POS[0] + shf * .4;
+  if (B.boss && B.boss.f && !B.boss.f.dead && !B.boss.outside && !B.boss.mv) B.boss.f.x = BOSS_POS[0] + shf * .4;
   B.impact = Math.max(0, B.impact - dt); if (B.zoom) { B.zoom.t += dt; if (B.zoom.t >= B.zoom.dur) B.zoom = null; }
   for (const e of B.eproj) e.t += dt; B.eproj = B.eproj.filter(e => e.t < e.dur);
   for (const p of B.parts) { p.t += dt; p.vy += p.g * dt; p.x += p.vx * dt; p.y += p.vy * dt; }
@@ -370,12 +408,17 @@ function updateBattle(dt) {
   }
   if (B.state === 'lose' || B.state === 'win') { if (B.st > 0) B.st -= dt; return; }
   // timing marker (keeps moving during intro)
-  B.mk += B.md * markerSpeed() * dt;
-  if (B.mk > 1) { B.mk = 2 - B.mk; B.md = -1; } if (B.mk < 0) { B.mk = -B.mk; B.md = 1; }
+  const mech = mechOf(activeUnit());
+  if (mech === 'bow') {
+    if (B.drawing) { B.mk += markerSpeed() * .8 * dt; if (B.mk >= 1.12) { B.mk = 1.12; B.over += dt; if (B.over > .45 && B.state === 'fight') { num(60, 270, 'overdrawn', '#ff6a6a'); bowRelease(); } } }
+    else B.mk = Math.max(0, B.mk - dt * 4);
+  } else if (mech === 'rune') { B.mk = ((B.mk + B.md * markerSpeed() * .62 * dt) % 1 + 1) % 1; }
+  else { B.mk += B.md * markerSpeed() * dt;
+  if (B.mk > 1) { B.mk = 2 - B.mk; B.md = -1; } if (B.mk < 0) { B.mk = -B.mk; B.md = 1; } }
   if (B.state !== 'fight') return;
   B.cd = Math.max(0, B.cd - dt); B.slowT = Math.max(0, B.slowT - dt);
   for (const k in B.buff) B.buff[k] = Math.max(0, B.buff[k] - dt);
-  if (!activeUnit()) { const nx = B.units.find(u => !u.dead); if (nx) save.active = nx.id; }
+  if (!activeUnit()) { const nx = B.units.find(u => !u.dead); if (nx) { save.active = nx.id; newTarget(); } }
   // party
   for (const u of B.units) {
     if (u.dead) continue;

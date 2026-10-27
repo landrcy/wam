@@ -33,6 +33,7 @@ const TUNE = {
   autoCdMul: 1.7,         // allies auto-attack this much slower than their cooldown
   autoDmgMul: 0.6,        // allies' auto attack damage
   foeHp: 40, foeHpGrow: 1.6,
+  soloHp: 0.55, soloDmg: 0.8, soloCls: { warrior: [1, 1], archer: [.9, .72], mage: [.82, .62] }, // [foe hp, foe dmg] per class: squishy heroes get gentler foes // solo hero: one character fights alone, so foes are trimmed to keep the same challenge
   foeDmg: 12, foeDmgGrow: 1.5,
   foeRate: 0.64,          // foe attack period multiplier (lower = more often)
   bossHp: 1.8,            // extra boss life
@@ -656,20 +657,35 @@ function newChar(id, lvl) {
 function newSave() {
   save = { v: 1, unlocked: 0, cleared: Array(12).fill(false), sel: 0, perfects: 0, bestStreak: 0, kills: 0, party: ['warrior'], active: 'warrior',
     chars: { warrior: newChar('warrior', 1) }, inv: [], scrap: 0, goblets: [], act4: false, mute: false, nextId: 1, bestLvl: 1, tut: false, started: false, autoScrap: false };
-  const sw = makeItem(1, 'weapon', 'warrior'); sw.rar = 0; sw.mods = { dmg: 2 }; sw.look = 0; sw.lk = 0; sw.name = 'Iron Shortsword'; save.chars.warrior.gear.weapon = sw;
+  save.cls = null; giveStarter('warrior');
   return save;
+}
+// the one hero of this save: chosen on the class select screen and locked
+function giveStarter(id) {
+  save.chars = { [id]: newChar(id, 1) }; save.party = [id]; save.active = id;
+  const sw = makeItem(1, 'weapon', id); sw.rar = 0; sw.mods = { dmg: 2 }; sw.look = 0; sw.lk = 0; sw.name = { warrior: 'Iron Shortsword', archer: 'Ash Shortbow', mage: 'Oak Wand' }[id]; save.chars[id].gear.weapon = sw;
+}
+function chooseClass(id) {
+  const m = save.mute; newSave(); save.mute = m; giveStarter(id); save.cls = id; save.started = true; persist();
 }
 function loadSave() {
   try { const s = JSON.parse(localStorage.getItem(SAVE_KEY)); if (s && s.v === 1 && s.chars) { save = s; for (const id in s.chars) for (const sl of SLOTS) if (s.chars[id].gear[sl] === undefined) s.chars[id].gear[sl] = null; if (s.autoScrap === undefined) s.autoScrap = false;
       for (const id in s.chars) { const c = s.chars[id]; delete c.st; delete c.stp; delete c.sp; c.seen = c.seen || []; for (const sl of SLOTS) { const it = c.gear[sl]; if (it && !it.cls) it.cls = id; } }
       for (const it of s.inv) if (!it.cls) it.cls = pick(s.party);
+      // solo migration: keep one hero (the warrior if present), scrap gear for the others
+      if (s.cls === undefined) { s.cls = s.chars.warrior ? 'warrior' : s.party[0]; s.started = true; }
+      if (s.cls) {
+        for (const id of Object.keys(s.chars)) if (id !== s.cls) delete s.chars[id];
+        s.party = [s.cls]; s.active = s.cls;
+        s.inv = s.inv.filter(it => { if (it.cls === s.cls) return true; s.scrap += it.rar + 1; return false; });
+      }
       return true; } } catch (e) {}
   newSave(); return false;
 }
 function persist() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) {} }
 const xpNeed = l => Math.round(10 + 6 * l * l);
 function addChar(id) {
-  if (save.party.includes(id)) return;
+  return; // solo: no recruits
   const lvl = Math.max(1, save.chars.warrior.lvl - 1);
   const c = newChar(id, lvl); save.chars[id] = c; save.party.push(id);
   const w = makeItem(Math.max(1, save.bestLvl - 1), 'weapon', id); w.rar = 1; c.gear.weapon = w;
@@ -1288,6 +1304,149 @@ function nodeState(c, n) {
 // skill ranks come from lit nodes
 function treeSk(c) { const T = buildTree(c.id), o = {}; for (const n of T.N) if (n.sk && nodeState(c, n) === 'own') o[n.sk] = (o[n.sk] || 0) + n.rank; return o; }
 function newlyLit(c) { const T = buildTree(c.id); c.seen = c.seen || []; return T.N.filter(n => n.k !== 'root' && nodeState(c, n) === 'own' && !c.seen.includes(n.id)); }
+// ---- Act backdrops: animated pixel-art scene filling the screen around the 320px box ----
+// Drawn in raw canvas pixels (1 canvas px = 1 logical px). Static layers are cached per act/size;
+// moving pieces (clouds, embers, torches, banners, swaying trees, shards) are drawn live and freeze under RM.
+const BDP = [
+  { sky: ['#141a33', '#23284a', '#4a3350', '#8a4a3c', '#c8763c'], far: '#2a2a3a', mid: '#1f3324', near: '#16261a', acc: '#ffb040' },
+  { sky: ['#140c0c', '#2a1414', '#4a2018', '#6e3020', '#8a4a2a'], far: '#2a1c1a', mid: '#1c1414', near: '#120c0c', acc: '#ff7a2a' },
+  { sky: ['#06060e', '#0c0c1c', '#14142a', '#1e1a34', '#2a2040'], far: '#16142a', mid: '#0e0c1a', near: '#0a0812', acc: '#c83040' },
+  { sky: ['#08040e', '#140a22', '#22103a', '#301650', '#3e1e66'], far: '#24183a', mid: '#180e28', near: '#0e0818', acc: '#c8a0ff' },
+];
+let bdCache = null;
+function bdRng(seed) { let a = seed >>> 0; return () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ t >>> 15, t | 1); t ^= t + Math.imul(t ^ t >>> 7, t | 61); return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function bdDither(g, x, y, w, h, a, b, k) { // k 0..1 share of b, ordered 2x2 dither
+  const M = [0, .5, .75, .25]; g.fillStyle = a; g.fillRect(x, y, w, h); g.fillStyle = b;
+  for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) if (M[((y + j) & 1) * 2 + ((x + i) & 1)] < k) g.fillRect(x + i, y + j, 1, 1);
+}
+function bdSky(g, P, W, H, hz) {
+  const n = P.sky.length - 1;
+  for (let y = 0; y < hz; y++) {
+    const f = y / hz * n, i = Math.min(n - 1, Math.floor(f)), k = f - i;
+    bdDither(g, 0, y, W, 1, P.sky[i], P.sky[i + 1], k);
+  }
+}
+function bdRidge(g, W, base, amp, fr, col, hi, seed, H) {
+  const r = bdRng(seed), ph = r() * 9;
+  for (let x = 0; x < W; x++) {
+    const y = Math.round(base - amp * (.55 * Math.sin(x * fr + ph) + .3 * Math.sin(x * fr * 2.7 + ph * 2) + .15 * Math.sin(x * fr * 6.1)));
+    g.fillStyle = col; g.fillRect(x, y, 1, H - y);
+    if (hi) { g.fillStyle = hi; if (x % 2 === 0 || Math.sin(x * fr * 3) > 0) g.fillRect(x, y, 1, 1); }
+  }
+}
+function bdBuild(act, W, H) {
+  const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d');
+  const P = BDP[act], hz = Math.round(H * .52), r = bdRng(act * 977 + 13);
+  bdSky(g, P, W, H, hz + 40);
+  const S = { hz, torches: [], banners: [], trees: [], windows: [], shards: [] };
+  if (act === 0) { // goblin lands: distant mountains, rolling hills, ploughed fields, war camp
+    bdRidge(g, W, hz - 30, 34, .011, P.far, '#3a3a50', 3, H);
+    bdRidge(g, W, hz, 14, .02, '#24402a', '#3a5a34', 5, H);
+    for (let y = hz + 8; y < H; y++) { const k = (y - hz) / (H - hz); bdDither(g, 0, y, W, 1, P.mid, P.near, k); if (y % 6 === 0) { g.fillStyle = '#2c4a26'; for (let x = (y * 7) % 5; x < W; x += 5) g.fillRect(x, y, 2, 1); } }
+    for (let i = 0; i < Math.max(5, W / 40); i++) { // tents
+      const x = Math.round(r() * W), y = hz + 2 + Math.round(r() * 10), w = 14 + Math.round(r() * 8);
+      for (let j = 0; j < w / 2; j++) { g.fillStyle = j < w / 4 ? '#6a4a2a' : '#4a3220'; g.fillRect(x - j, y - w / 2 + j, j * 2, 1); }
+      g.fillStyle = '#1a1008'; g.fillRect(x - 1, y - 4, 2, 4); S.torches.push([x + w / 2 + 2, y - 8]);
+    }
+  } else if (act === 1) { // burnt ash forest
+    bdRidge(g, W, hz - 10, 20, .015, P.far, '#3a2620', 8, H);
+    for (let y = hz; y < H; y++) bdDither(g, 0, y, W, 1, P.mid, P.near, (y - hz) / (H - hz));
+    for (let y = hz; y < H; y += 3) { g.fillStyle = '#2a2020'; for (let x = (y * 5) % 7; x < W; x += 7 + (y % 4)) g.fillRect(x, y, 2, 1); }
+    for (let i = 0; i < W / 12; i++) S.trees.push({ x: Math.round(r() * W), y: hz + Math.round(r() * 30) - 4, h: 40 + Math.round(r() * 50), ph: r() * 6 });
+    S.trees.sort((a, b) => a.y - b.y);
+  } else if (act === 2) { // black keep
+    for (let i = 0; i < W * hz / 300; i++) { g.fillStyle = r() < .2 ? '#c8c8e0' : '#4a4a6a'; g.fillRect(Math.round(r() * W), Math.round(r() * hz * .8), 1, 1); }
+    g.fillStyle = '#d8d8c8'; const mx = Math.round(W * .78), my = Math.round(hz * .25);
+    for (let y = -9; y <= 9; y++) for (let x = -9; x <= 9; x++) if (x * x + y * y <= 81) { g.fillStyle = (x + 3) * (x + 3) + (y - 2) * (y - 2) < 40 ? '#e8e8d8' : '#a8a898'; g.fillRect(mx + x, my + y, 1, 1); }
+    bdRidge(g, W, hz + 4, 10, .02, P.far, '#24203a', 21, H);
+    const cx = Math.round(W / 2), base = hz + 6; // castle silhouette centred behind the box
+    const towers = []; for (let i = -9; i <= 9; i++) towers.push({ x: cx + i * Math.max(26, W / 16) + Math.round(r() * 8), h: 70 + Math.abs(i) * 6 + Math.round(r() * 40), w: 14 + Math.round(r() * 8) });
+    g.fillStyle = P.mid; g.fillRect(0, base - 36, W, H);
+    for (let x = 0; x < W; x += 6) g.fillRect(x, base - 40, 4, 4);
+    towers.forEach(t => {
+      g.fillStyle = P.mid; g.fillRect(t.x - t.w / 2, base - t.h, t.w, t.h);
+      for (let j = 0; j < t.w / 2 + 4; j++) { g.fillStyle = '#0a0814'; g.fillRect(t.x - j, base - t.h - t.w / 2 - 4 + j, j * 2, 1); }
+      g.fillStyle = '#1a1830'; g.fillRect(t.x - t.w / 2, base - t.h, 1, t.h);
+      for (let k = 0; k < 3; k++) if (r() < .6) S.windows.push([t.x - 1, base - t.h + 10 + k * 16]);
+      S.banners.push([t.x, base - t.h - t.w / 2 - 4]);
+    });
+    for (let y = base; y < H; y++) bdDither(g, 0, y, W, 1, P.mid, P.near, (y - base) / (H - base));
+  } else { // mirror void: reflective floor grid and floating shards
+    for (let y = hz; y < H; y++) { bdDither(g, 0, y, W, 1, '#140a22', '#08040e', (y - hz) / (H - hz)); }
+    g.fillStyle = '#3a2460'; for (let k = 1; k < 30; k++) { const y = hz + Math.round(k * k * .6); if (y < H) g.fillRect(0, y, W, 1); }
+    for (let k = -30; k <= 30; k++) for (let y = hz; y < H; y += 2) { const x = Math.round(W / 2 + k * 8 * (1 + (y - hz) / 14)); if (x >= 0 && x < W) g.fillRect(x, y, 1, 1); }
+    for (let i = 0; i < W / 30; i++) S.shards.push({ x: r() * W, y: r() * hz * .9 + 8, s: 6 + r() * 12, ph: r() * 6, sp: .2 + r() * .5 });
+  }
+  return { c, S, act, W, H };
+}
+function bdTorch(x, y, t) {
+  const f = RM ? 1 : .7 + .3 * Math.sin(t * 13 + x) * Math.sin(t * 7.3 + y);
+  ctx.globalAlpha = .25 * f; ctx.fillStyle = '#ffa040'; ctx.fillRect(x - 3, y - 3, 7, 7); ctx.globalAlpha = 1;
+  ctx.fillStyle = '#3a2410'; ctx.fillRect(x, y + 1, 1, 6);
+  ctx.fillStyle = '#ff7020'; ctx.fillRect(x - 1, y - 1, 3, 2); ctx.fillStyle = '#ffd060'; ctx.fillRect(x, y - 1 - Math.round(f * 2), 1, 2 + Math.round(f));
+}
+function drawBackdrop() {
+  const act = scene === 'battle' && B ? B.act : scene === 'camp' && typeof save !== 'undefined' && save ? Math.floor((save.sel || 0) / 3) : -1;
+  if (act < 0 || act > 3) return false;
+  if (!bdCache || bdCache.act !== act || bdCache.W !== VW || bdCache.H !== VH) bdCache = bdBuild(act, VW, VH);
+  const { c, S } = bdCache, t = RM ? 0 : gtime, P = BDP[act];
+  const px = RM ? 0 : Math.round(Math.sin(t * .05) * 3);
+  ctx.drawImage(c, px - 3, 0, VW + 6, VH, -3, 0, VW + 6, VH);
+  // clouds / ash haze drifting
+  const cr = bdRng(act + 77);
+  for (let i = 0; i < 7; i++) {
+    const w = 30 + cr() * 50, y = Math.round(cr() * S.hz * .7), sp = 3 + cr() * 5;
+    const x = Math.round(((cr() * VW + t * sp) % (VW + w)) - w);
+    ctx.globalAlpha = act === 3 ? .12 : .22; ctx.fillStyle = act === 1 ? '#3a2a28' : act === 3 ? '#8060c0' : '#4a4a68';
+    ctx.fillRect(x, y, w, 3); ctx.fillRect(x + 6, y - 2, w - 14, 2); ctx.fillRect(x + 3, y + 3, w - 8, 1);
+  }
+  ctx.globalAlpha = 1;
+  S.torches.forEach(([x, y]) => bdTorch(x + px, y, t));
+  S.trees.forEach(tr => { // dead trees sway at the tips
+    const sw = RM ? 0 : Math.sin(t * .8 + tr.ph) * 1.5;
+    ctx.fillStyle = '#0a0606'; ctx.fillRect(tr.x + px - 1, tr.y - tr.h, 3, tr.h);
+    for (let k = 0; k < 4; k++) { const by = tr.y - tr.h * (.45 + k * .13), d = k % 2 ? 1 : -1, L = 10 - k * 2;
+      for (let j = 0; j < L; j++) ctx.fillRect(tr.x + px + d * j + Math.round(sw * j / L), by - Math.round(j * .6), 1, 1); }
+    ctx.fillStyle = '#ff6020'; if (tr.ph > 4.5) { ctx.globalAlpha = .6 + .4 * Math.sin(t * 5 + tr.ph); ctx.fillRect(tr.x + px, tr.y - tr.h * .3, 1, 1); ctx.globalAlpha = 1; }
+  });
+  if (act === 1) { // the treant looms on the horizon, eyes glowing
+    const tx = Math.round(VW * .18), ty = S.hz + 10, br = RM ? 0 : Math.round(Math.sin(t * .6) * 1);
+    ctx.fillStyle = '#0c0808'; ctx.fillRect(tx - 9, ty - 90 + br, 18, 90); ctx.fillRect(tx - 20, ty - 70 + br, 6, 30); ctx.fillRect(tx + 14, ty - 76 + br, 6, 34);
+    ctx.fillRect(tx - 26, ty - 82 + br, 52, 10); ctx.fillRect(tx - 32, ty - 92 + br, 8, 12); ctx.fillRect(tx + 24, ty - 96 + br, 8, 16);
+    ctx.fillStyle = '#ff9030'; ctx.globalAlpha = .7 + .3 * Math.sin(t * 2); ctx.fillRect(tx - 5, ty - 78 + br, 3, 2); ctx.fillRect(tx + 3, ty - 78 + br, 3, 2); ctx.globalAlpha = 1;
+  }
+  S.windows.forEach(([x, y], i) => { const f = RM ? 1 : .6 + .4 * Math.sin(t * 3 + i * 1.7); ctx.globalAlpha = f; rectRaw(x + px, y, 2, 3, '#e8a040'); ctx.globalAlpha = 1; });
+  S.banners.forEach(([x, y], i) => { // flapping banners
+    ctx.fillStyle = '#2a2a2a'; ctx.fillRect(x + px, y - 10, 1, 10);
+    for (let j = 0; j < 8; j++) { const w = RM ? 0 : Math.round(Math.sin(t * 5 - j * .7 + i) * 1.2); ctx.fillStyle = j > 5 ? '#8a1c28' : P.acc; ctx.fillRect(x + px + 1 + j, y - 10 + w, 1, 4 - (j > 5 ? 1 : 0)); }
+  });
+  S.shards.forEach(s => { // mirror shards drift and glint
+    const y = s.y + (RM ? 0 : Math.sin(t * s.sp + s.ph) * 4), x = s.x + px, gl = RM ? .5 : .5 + .5 * Math.sin(t * 1.3 + s.ph * 3);
+    ctx.fillStyle = '#2a1e48'; for (let j = 0; j < s.s; j++) ctx.fillRect(Math.round(x - j / 2), Math.round(y + j), Math.max(1, Math.round(j / 2)), 1);
+    ctx.fillStyle = '#8a70c8'; for (let j = 0; j < s.s; j++) ctx.fillRect(Math.round(x - j / 2), Math.round(y + j), 1, 1);
+    ctx.globalAlpha = gl; ctx.fillStyle = '#e8d8ff'; ctx.fillRect(Math.round(x), Math.round(y + 2), 1, 1); ctx.globalAlpha = 1;
+    ctx.globalAlpha = .25; ctx.fillStyle = '#5a40a0'; for (let j = 0; j < s.s; j += 2) ctx.fillRect(Math.round(x - j / 2), Math.round(2 * S.hz - y - j + 30), 1, 1); ctx.globalAlpha = 1;
+  });
+  // particles: embers (I, II), ash (II), motes (IV)
+  if (!RM) {
+    const pr = bdRng(act * 31 + 5), N = Math.round(VW * VH / 9000);
+    for (let i = 0; i < N; i++) {
+      const sp = 8 + pr() * 16, ph = pr() * 100, x0 = pr() * VW, life = (t * sp / VH + ph) % 1;
+      const y = VH - life * VH, x = x0 + Math.sin(t + ph) * 6;
+      ctx.globalAlpha = .7 * (1 - life);
+      ctx.fillStyle = act === 3 ? '#c8a0ff' : act === 2 ? '#8a8aa8' : i % 3 ? '#ff8030' : '#ffd060';
+      if (act === 2 && i % 2) continue;
+      ctx.fillRect(Math.round(x), Math.round(y), 1, 1);
+    }
+    ctx.globalAlpha = 1;
+  }
+  // dim it so the box stays the focus: overall shade plus a darker ring hugging the frame
+  ctx.globalAlpha = .38; ctx.fillStyle = '#000'; ctx.fillRect(0, 0, VW, VH);
+  for (let k = 1; k <= 3; k++) { ctx.globalAlpha = .18; ctx.fillRect(OX - k * 4, OY - k * 4, LW + k * 8, LH + k * 8); }
+  ctx.globalAlpha = 1;
+  return true;
+}
+function rectRaw(x, y, w, h, c) { ctx.fillStyle = c; ctx.fillRect(Math.round(x), Math.round(y), w, h); }
 // ================= battle =================
 let B = null;
 const PPOS = { 1: [[92, 182]], 2: [[94, 150], [62, 218]], 3: [[96, 172], [62, 110], [62, 234]] };
@@ -1299,7 +1458,7 @@ function startLevel(li) {
   const n = save.party.length;
   B = { li, act: Math.floor(li / 3), wave: 0, foes: [], units: [], t: 0, mk: 0, md: 1, zc: .5, cd: 0, state: 'intro', st: 1.0,
     fx: [], parts: [], nums: [], proj: [], shake: 0, hitstop: 0, loot: [], xp: 0, streak: 0, perf: 0, target: 0,
-    buff: { dmg: 0, spd: 0, heal: 0 }, gobUsed: {}, label: null, flash: null, banner: null, paused: false, msgs: [], quake: 0, zBase: .5, boss: null, trail: [], heat: 0, slowT: 0, zc2: .2, zw: .8, novaC: {}, shC: {}, crackFx: null, barShake: 0, eproj: [], combo: 0, impact: 0, zoom: null, dust: [] };
+    buff: { dmg: 0, spd: 0, heal: 0 }, gobUsed: {}, label: null, flash: null, banner: null, paused: false, msgs: [], quake: 0, zBase: .5, boss: null, trail: [], heat: 0, slowT: 0, zc2: .2, zw: .8, drawing: false, drawT: 0, tapMode: false, over: 0, runes: [], runeQ: [], novaC: {}, shC: {}, crackFx: null, barShake: 0, eproj: [], combo: 0, impact: 0, zoom: null, dust: [] };
   B.units = save.party.map((id, i) => {
     const c = save.chars[id], s = calcStats(c), [x, y] = PPOS[n][i];
     return { id, c, s, hp: s.hp, max: s.hp, x, y, bx: x, ox: -60, lt: 0, hurt: 0, atkT: rnd(.4, 1.2), dead: false, guard: 0, spr: charSpr(c), dash: null, hop: 0, kb: 0, cast: 0, seed: i * 1.7 };
@@ -1307,7 +1466,7 @@ function startLevel(li) {
   const bar = B.units.reduce((a, u) => a + (u.s.barrier || 0), 0);
   B.units.forEach(u => u.s.arm += bar);
   if (!save.party.includes(save.active)) save.active = save.party[0];
-  spawnWave(0); rerollBar();
+  spawnWave(0); newTarget();
   scene = 'battle';
   banner(ACTS[B.act].roman + '-' + (li % 3 + 1) + '  ' + LEVELS[li].n, ACTS[B.act].c, 1.4);
 }
@@ -1315,8 +1474,8 @@ function spawnWave(w) {
   const keys = LEVELS[B.li].w[w], n = keys.length;
   B.foes = keys.map((k, i) => {
     const T = FOES[k], L = B.li + 1, [x, y] = FPOS[n][i];
-    const hp = Math.round(TUNE.foeHp * Math.pow(TUNE.foeHpGrow, L - 1) * T.hp * (T.boss ? TUNE.bossHp : 1));
-    return { k, T, L, hp, max: hp, dmg: TUNE.foeDmg * Math.pow(TUNE.foeDmgGrow, L - 1) * T.dmg, timer: T.per * TUNE.foeRate * rnd(.7, 1.1) + .9, wind: 0, per: T.per * TUNE.foeRate, pend: null, anim: null, dodge: 0,
+    const hp = Math.round(TUNE.foeHp * Math.pow(TUNE.foeHpGrow, L - 1) * T.hp * (T.boss ? TUNE.bossHp : 1) * TUNE.soloHp * (TUNE.soloCls[save.cls] || [1])[0]);
+    return { k, T, L, hp, max: hp, dmg: TUNE.foeDmg * Math.pow(TUNE.foeDmgGrow, L - 1) * T.dmg * TUNE.soloDmg * (TUNE.soloCls[save.cls] || [1, 1])[1], timer: T.per * TUNE.foeRate * rnd(.7, 1.1) + .9, wind: 0, per: T.per * TUNE.foeRate, pend: null, anim: null, dodge: 0,
       x, y, spr: T.spr, sc: T.sc, ox: 90 + i * 12, flash: 0, kx: 0, dead: false, burnT: 0, burnDps: 0, burnAcc: 0, chill: 0, freeze: 0, lt: 0, atk: 0, reviveT: 0, seed: rnd(10) };
   });
   B.target = B.foes.findIndex(f => f.T.boss) >= 0 ? B.foes.findIndex(f => f.T.boss) : 0;
@@ -1327,6 +1486,35 @@ function spawnWave(w) {
 }
 function unitAtk(u) { return evoField(u.c, 'atk', CLS[u.id].atk); }
 function unitBar(u) { return u ? evoField(u.c, 'bar', null) : null; }
+// each class has its own timing mechanic: warrior sword bar, archer bow draw (hold + release), mage rune circle
+const MECH = { warrior: 'sword', archer: 'bow', mage: 'rune' };
+const mechOf = u => u ? MECH[u.id] || 'sword' : 'sword';
+const circD = (a, b) => { const d = Math.abs(a - b) % 1; return Math.min(d, 1 - d); };
+function aimD() { const u = activeUnit(); return mechOf(u) === 'rune' ? circD(B.mk, B.zc) : Math.abs(B.mk - B.zc); }
+function newTarget() {
+  const m = mechOf(activeUnit());
+  if (m === 'bow') { B.zc = B.zBase = rnd(.45, .88); B.zc2 = B.zc > .66 ? B.zc - rnd(.2, .28) : Math.min(.96, B.zc + rnd(.16, .24)); B.drawing = false; B.tapMode = false; B.over = 0; B.mk = 0; B.md = 1; return; }
+  if (m === 'rune') {
+    const n = Math.random() < .15 + .07 * B.act ? 3 : Math.random() < .35 ? 2 : 1; let a = B.mk + B.md * rnd(.15, .3); B.runes = [];
+    for (let i = 0; i < n; i++) { B.runes.push(((a % 1) + 1) % 1); a += B.md * rnd(.14, .2); }
+    B.runeQ = []; B.zc = B.zBase = B.runes[0]; return;
+  }
+  B.zc = B.zBase = rnd(.18, .82); rerollBar();
+}
+function pressJ() {
+  if (!B || B.state !== 'fight' || B.paused) return;
+  const u = activeUnit(); if (!u) return;
+  if (mechOf(u) !== 'bow') return strike();
+  if (B.cd > 0) return;
+  if (!B.drawing) { B.drawing = true; B.drawT = B.t; B.tapMode = false; B.over = 0; B.mk = 0; SFX.click(); }
+  else if (B.tapMode) bowRelease();
+}
+function releaseJ() {
+  if (!B || !B.drawing || B.tapMode) return;
+  if (B.t - B.drawT < .15) { B.tapMode = true; return; }   // a quick tap: keep drawing, tap again to loose
+  bowRelease();
+}
+function bowRelease() { if (!B.drawing) return; strike(); }
 function rerollBar() { B.zc2 = B.zc < .5 ? rnd(Math.min(.86, B.zc + .3), .88) : rnd(.12, Math.max(.14, B.zc - .3)); B.zw = B.zc < .5 ? rnd(Math.min(.86, B.zc + .25), .88) : rnd(.12, Math.max(.14, B.zc - .25)); }
 const activeUnit = () => B.units.find(u => u.id === save.active && !u.dead);
 const liveFoes = () => B.foes.filter(f => !f.dead);
@@ -1360,7 +1548,7 @@ function markerSpeed() {
 function switchTo(i) {
   if (!B || B.state === 'win' || B.state === 'lose') return;
   const u = B.units[i]; if (!u || u.dead || u.id === save.active) return;
-  save.active = u.id; SFX.click(); B.cd = Math.max(B.cd, .15);
+  save.active = u.id; SFX.click(); B.cd = Math.max(B.cd, .15); newTarget();
   B.fx.push({ type: 'ring', x: u.x, y: u.y - 24, t: 0, dur: .3, col: '#ffffff' });
 }
 function cycleUnit() {
@@ -1371,17 +1559,26 @@ function strike() {
   if (!B || B.state !== 'fight' || B.paused) return;
   const u = activeUnit(); if (!u) return;
   if (B.cd > 0) return;
-  const { g, p } = zones(), d = Math.abs(B.mk - B.zc);
+  const { g, p } = zones(), d = aimD(), mech = mechOf(u);
+  if (mech === 'bow' && !B.drawing) return;
   const bv = unitBar(u);
   let q = d <= p / 2 ? 'perfect' : d <= g / 2 ? 'good' : 'miss', ward = false;
   if (bv === 'twin' && q !== 'perfect' && Math.abs(B.mk - B.zc2) <= p / 2) q = 'perfect';
+  if (mech === 'bow') { B.drawing = false; B.tapMode = false; SFX.click(); }
+  if (mech === 'rune' && q !== 'miss') {
+    B.runeQ.push(q);
+    if (B.runeQ.length < B.runes.length) {   // light this rune, aim for the next one
+      B.zc = B.zBase = B.runes[B.runeQ.length]; B.flash = { q, t: .3, x: B.mk }; B.label = { q, t: .5, x: B.mk, rune: B.runeQ.length + '/' + B.runes.length }; SFX.click(); return;
+    }
+    q = B.runeQ.every(x => x === 'perfect') ? 'perfect' : 'good';
+  }
   if (bv === 'guard' && q === 'miss' && Math.abs(B.mk - B.zw) <= g * .3) { q = 'good'; ward = true; }
   B.cd = u.s.cd * (B.buff.spd > 0 ? .67 : 1);
   B.flash = { q, t: .3, x: B.mk };
   if (q === 'perfect') { save.perfects++; B.streak++; B.perf++; save.bestStreak = Math.max(save.bestStreak, B.streak); }
   else if (q === 'miss') B.streak = 0;
   B.label = { q, t: .7, x: B.mk };
-  B.zc = B.zBase = rnd(.18, .82); rerollBar();
+  newTarget();
   if (ward) { B.units.forEach(o => { if (!o.dead) o.guard = 1; }); num(u.x, u.y - 70, 'WARD', COL.blue); B.fx.push({ type: 'ring', x: u.x, y: u.y - 24, t: 0, dur: .4, col: '#a6caff' }); }
   if (bv === 'frost' && q === 'perfect') B.slowT = 1.2;
   if (bv === 'heat' && q === 'perfect') B.heat = Math.min(5, B.heat + 1);
@@ -1597,11 +1794,11 @@ function winLevel() {
   save.cleared[li] = true;
   save.unlocked = Math.max(save.unlocked, Math.min(11, li + 1));
   const msgs = [];
-  if (first && li === 2) { save.goblets.push('blue'); addChar('archer'); msgs.push({ title: 'An Archer joins!', spr: 'archer', col: '#5fae5f', lines: ['Fast shots from the back row.', 'Press 1 2 3 (or tap a portrait) to', 'choose who you control. The others', 'auto-attack.', '', 'Found the Blue Goblet.'] }); }
-  if (first && li === 5) { save.goblets.push('green'); addChar('mage'); msgs.push({ title: 'A Mage joins!', spr: 'mage', col: '#7a8cff', lines: ['Slow blasts that splash every foe.', '', 'Found the Green Goblet.'] }); }
+  if (first && li === 2) { save.goblets.push('blue'); msgs.push({ title: 'Blue Goblet', char: save.chars[save.cls], col: '#5a8cff', lines: ['Found the Blue Goblet.'] }); }
+  if (first && li === 5) { save.goblets.push('green'); msgs.push({ title: 'Green Goblet', char: save.chars[save.cls], col: '#5fd06a', lines: ['Found the Green Goblet.'] }); }
   if (first && li === 8) {
     save.goblets.push('red');
-    msgs.push({ title: 'Act III cleared', spr: 'warrior', col: COL.gold, lines: ['The Black Keep falls silent.', 'Found the Red Goblet.', '', 'But something stirs beyond the keep...', 'The void hungers for perfection.'] });
+    msgs.push({ title: 'Act III cleared', char: save.chars[save.cls], col: COL.gold, lines: ['The Black Keep falls silent.', 'Found the Red Goblet.', '', 'But something stirs beyond the keep...', 'The void hungers for perfection.'] });
   }
   if (act4Ready() && !save.act4) { save.act4 = true; msgs.push({ title: 'A void opens', spr: 'shade', col: '#b480ff', lines: ['Your ' + TUNE.act4Perfects + ' perfect strikes tore the sky.', 'Secret Act IV: The Void is open.'] }); }
   if (first && li === 11) msgs.push({ title: 'The reflection breaks', spr: 'mirror', col: '#ffffff', lines: ['You beat the secret act.', 'Thanks for testing W.A.M.!'] });
@@ -1634,7 +1831,7 @@ function updateBattle(dt) {
     f.ox += (0 - f.ox) * Math.min(1, dt * 7); f.kx += (0 - f.kx) * Math.min(1, dt * 14); f.flash -= dt; f.lt = Math.max(0, f.lt - dt);
     if (f.anim) { f.anim.t += dt; if (f.anim.t >= f.anim.dur) f.anim = null; }
   }
-  if (B.boss && B.boss.f && !B.boss.f.dead) B.boss.f.x = BOSS_POS[0] + shf * .4;
+  if (B.boss && B.boss.f && !B.boss.f.dead && !B.boss.outside && !B.boss.mv) B.boss.f.x = BOSS_POS[0] + shf * .4;
   B.impact = Math.max(0, B.impact - dt); if (B.zoom) { B.zoom.t += dt; if (B.zoom.t >= B.zoom.dur) B.zoom = null; }
   for (const e of B.eproj) e.t += dt; B.eproj = B.eproj.filter(e => e.t < e.dur);
   for (const p of B.parts) { p.t += dt; p.vy += p.g * dt; p.x += p.vx * dt; p.y += p.vy * dt; }
@@ -1660,12 +1857,17 @@ function updateBattle(dt) {
   }
   if (B.state === 'lose' || B.state === 'win') { if (B.st > 0) B.st -= dt; return; }
   // timing marker (keeps moving during intro)
-  B.mk += B.md * markerSpeed() * dt;
-  if (B.mk > 1) { B.mk = 2 - B.mk; B.md = -1; } if (B.mk < 0) { B.mk = -B.mk; B.md = 1; }
+  const mech = mechOf(activeUnit());
+  if (mech === 'bow') {
+    if (B.drawing) { B.mk += markerSpeed() * .8 * dt; if (B.mk >= 1.12) { B.mk = 1.12; B.over += dt; if (B.over > .45 && B.state === 'fight') { num(60, 270, 'overdrawn', '#ff6a6a'); bowRelease(); } } }
+    else B.mk = Math.max(0, B.mk - dt * 4);
+  } else if (mech === 'rune') { B.mk = ((B.mk + B.md * markerSpeed() * .62 * dt) % 1 + 1) % 1; }
+  else { B.mk += B.md * markerSpeed() * dt;
+  if (B.mk > 1) { B.mk = 2 - B.mk; B.md = -1; } if (B.mk < 0) { B.mk = -B.mk; B.md = 1; } }
   if (B.state !== 'fight') return;
   B.cd = Math.max(0, B.cd - dt); B.slowT = Math.max(0, B.slowT - dt);
   for (const k in B.buff) B.buff[k] = Math.max(0, B.buff[k] - dt);
-  if (!activeUnit()) { const nx = B.units.find(u => !u.dead); if (nx) save.active = nx.id; }
+  if (!activeUnit()) { const nx = B.units.find(u => !u.dead); if (nx) { save.active = nx.id; newTarget(); } }
   // party
   for (const u of B.units) {
     if (u.dead) continue;
@@ -1989,9 +2191,9 @@ function bossBits(cv, x0, y0, n, sp, life) {
   const g = cv.getContext('2d'), d = g.getImageData(0, 0, cv.width, cv.height).data, pts = [];
   for (let y = 0; y < cv.height; y += 2) for (let x = 0; x < cv.width; x += 2) { const i = (y * cv.width + x) * 4; if (d[i + 3] > 200) pts.push([x, y, '#' + [d[i], d[i + 1], d[i + 2]].map(v => v.toString(16).padStart(2, '0')).join('')]); }
   for (let k = 0; k < n && pts.length; k++) {
-    const [x, y, col] = pts[Math.floor(Math.random() * pts.length)], px = x0 + x * PSC, py = y0 + y * PSC, cx = x0 + cv.width * PSC / 2, cy = y0 + cv.height * PSC * .6;
+    const [x, y, col] = pts[Math.floor(Math.random() * pts.length)], S = (B.boss && B.boss.f.sc) || PSC, px = x0 + x * S, py = y0 + y * S, cx = x0 + cv.width * S / 2, cy = y0 + cv.height * S * .6;
     const an = Math.atan2(py - cy, px - cx) + rnd(-.4, .4), v = rnd(.3, 1) * sp;
-    B.parts.push({ x: px, y: py, vx: Math.cos(an) * v, vy: Math.sin(an) * v - 40, t: 0, life: rnd(.5, 1) * life, col, s: PSC, g: 220 });
+    B.parts.push({ x: px, y: py, vx: Math.cos(an) * v, vy: Math.sin(an) * v - 40, t: 0, life: rnd(.5, 1) * life, col, s: S, g: 220 });
   }
 }
 function bossPose(f) {
@@ -2019,8 +2221,28 @@ function bossKilled(f) {
 }
 function bossShatter(f) {
   const bo = B.boss; if (!bo) return;
-  const cv = bossFrame(bo.k, bo.phase, bossPose(f)), x0 = f.x - BW * PSC / 2 - PSC, y0 = f.y - BH * PSC - PSC;
+  const cv = bossFrame(bo.k, bo.phase, bossPose(f)), x0 = f.x - BW * f.sc / 2 - f.sc, y0 = f.y - BH * f.sc - f.sc;
   bossBits(cv, x0, y0, 260, 260, 1.6);
+}
+// where the boss fights from once it has broken out: beside the box on wide screens, looming above it on tall ones
+function bossOutPos(bo) {
+  const side = bo.side || 1;
+  if (OX >= 150) { const sc = clamp(Math.floor((OX + 30) / BW), 2, 4); return { x: side > 0 ? LW + Math.min(OX * .5, BW * sc * .42) : -Math.min(OX * .5, BW * sc * .42), y: LH * .78, sc, where: 'side' }; }
+  if (OY >= 40) { const sc = clamp(Math.floor((OY + 100) / BH), 2, 4); return { x: 160 + side * 40, y: clamp(BH * sc - OY + 2, -6, 96), sc, where: 'top' }; } // looms over the top of the box
+  return { x: BOSS_POS[0], y: BOSS_POS[1], sc: PSC, where: 'in' };
+}
+function bossMove(bo, dur) { const f = bo.f; bo.mv = { t: 0, dur, x0: f.x, y0: f.y, s0: f.sc, to: bossOutPos(bo), broke: false }; }
+function updateBossMove(bo, dt) {
+  const f = bo.f, m = bo.mv; if (!m) { if (bo.outside) { const o = bossOutPos(bo); f.x = o.x; f.y = o.y; f.sc = o.sc; } return; }
+  m.t += dt; const k = clamp(m.t / m.dur, 0, 1), e = ease(k), to = m.to;
+  f.x = m.x0 + (to.x - m.x0) * e; f.y = m.y0 + (to.y - m.y0) * e - Math.sin(k * Math.PI) * (RM ? 10 : 70);
+  f.sc = k < .5 ? m.s0 : to.sc;
+  if (k > .45 && !m.broke && !bo.outside && to.where !== 'in') { // crashing through the frame
+    m.broke = true; bo.integ = Math.min(bo.integ, .3); borderShards(true); addCracks(10, B.t); quake(12); bossFlash('#ffffff', .3); SFX.shatter();
+    const ex = to.where === 'side' ? (to.x > 160 ? LW : 0) : clamp(to.x, 10, LW - 10), ey = to.where === 'side' ? LH * .55 : 0;
+    for (let i = 0; i < 40; i++) B.parts.push({ x: ex, y: ey + rnd(-30, 30), vx: rnd(-160, 160), vy: rnd(-160, 60), t: 0, life: rnd(.4, 1), col: i % 2 ? bo.D.crack : '#d8b04a', s: i % 3 ? 2 : 3, g: 180 });
+  }
+  if (k >= 1) { bo.mv = null; bo.outside = to.where !== 'in'; quake(8); SFX.land(); }
 }
 const expFor = (bo, ph) => bo.D.phases < 2 ? 70 : 26 + 98 * ph / (bo.D.phases - 1);
 function updateBoss(dt) {
@@ -2038,24 +2260,26 @@ function updateBoss(dt) {
       ev.land = 1; f.drop = 0; quake(9); SFX.land(); banner(FOES[f.k].n, bo.D.crack, 1.4);
       for (let i = 0; i < 30; i++) B.parts.push({ x: f.x + rnd(-90, 90), y: f.y, vx: rnd(-110, 110), vy: rnd(-110, -20), t: 0, life: rnd(.3, .8), col: i % 3 ? pick(ACTPAL[B.act].dust) : bo.D.crack, s: i % 2 ? 2 : 4, g: 260 });
     }
-    if (t > 2.5) { bo.st = 'fight'; B.state = 'fight'; }
+    if (t > 2.3 && !ev.leap) { ev.leap = 1; bo.side = 1; bossMove(bo, RM ? .5 : 1.1); SFX.roar(); }
+    if (ev.leap && !bo.mv && t > 2.6) { bo.st = 'fight'; B.state = 'fight'; }
   } else if (bo.st === 'phase') {
     if (!RM && t < .45 && Math.random() < .6) { const [cx, cy] = foeCenter(f); spark(cx + rnd(-60, 60), cy + rnd(-60, 60), bo.D.crack, 120); }
     if (t > .45 && !ev.morph) {
       ev.morph = 1; SFX.morph(); bossFlash('#ffffff', .25); bo.inv = !!BOSS[bo.k].pats[bo.phase].invert; quake(9);
-      const x0 = f.x - BW * PSC / 2 - PSC, y0 = f.y - BH * PSC - PSC;
+      const x0 = f.x - BW * f.sc / 2 - f.sc, y0 = f.y - BH * f.sc - f.sc;
       if (bo.old) bossBits(bo.old, x0, y0, bo.tr === 'burst' ? 170 : 90, bo.tr === 'burst' ? 300 : 160, 1.2);
-      bo.expT = expFor(bo, bo.phase);
+      bo.expT = expFor(bo, bo.phase); if (bo.outside) { bo.side = -(bo.side || 1); bossMove(bo, RM ? .4 : .8); }
       for (let i = 0; i < 26; i++) spark(...foeCenter(f), i % 2 ? bo.D.crack : '#ffffff', 260);
       if (bo.tr === 'reasm') bo.reasm = mkReasm(bossFrame(bo.k, bo.phase, bossPose(f)));
     }
-    if (t > 1.3) { bo.st = 'fight'; f.inv = false; f.timer = f.per * .8; bo.old = null; bo.reasm = null; }
+    if (t > 1.3 && !bo.mv) { bo.st = 'fight'; f.inv = false; f.timer = f.per * .8; bo.old = null; bo.reasm = null; }
   } else if (bo.st === 'outro') {
     if (t > .5 && !ev.back) { ev.back = 1; borderShards(false); SFX.rumble(); }
     if (t > .5) bo.integ = .3 + .7 * clamp((t - .5) / .85, 0, 1);
     if (t > 1.4 && !ev.ref) { ev.ref = 1; bo.integ = 1; bossFlash('#ffffff', .3); SFX.reform(); }
     if (t > 1.9) bo.st = 'done';
   }
+  updateBossMove(bo, dt);
   if (bo.st === 'fight' && !f.dead) {
     const pat = bossPat() || {};
     if (pat.drift && B.state === 'fight') B.zc = clamp(B.zBase + Math.sin(B.t * 1.6) * pat.drift, .12, .88);
@@ -2071,13 +2295,18 @@ function mkReasm(cv) { // pixel list with scattered start positions: the new for
 }
 // ---------- boss attacks: a unique move per boss and phase ----------
 function bossAttackFx(f, targets, slam) {
-  const bo = B.boss, ph = bo.phase, fx = f.x - 70, gy = 246;
+  const bo = B.boss, ph = bo.phase, out = bo.outside, [bcx, bcy] = foeCenter(f), fx = out ? 250 : f.x - 70, gy = 246;
   const add = e => B.fx.push(Object.assign({ t: 0 }, e));
+  if (out) { // an arm / tendril smashes in through the cracked frame, then the attack lands
+    const ex = bcx > LW ? LW : bcx < 0 ? 0 : clamp(bcx, 20, LW - 20), ey = bcx > LW || bcx < 0 ? clamp(bcy, 60, 240) : 0;
+    targets.forEach(u => add({ type: 'reach', x0: bcx, y0: bcy, ex, ey, x: u.x + 14, y: u.y - 22, dur: .42, col: bo.D.crack }));
+    addCracks(2, B.t);
+  }
   const tx = targets.map(u => [u.x, u.y]);
   SFX.whoosh();
   if (bo.k === 'gobchief') {
     add({ type: 'shock', x: fx, y: gy, dur: .45, col: ph ? '#ff7a1a' : '#8a7a5a', to: 20 });
-    if (ph) tx.forEach(([x, y], i) => add({ type: 'rock', x0: fx, y0: 120, x, y: y - 10, dur: .16 + i * .03, col: '#ff7a1a' }));
+    if (ph) tx.forEach(([x, y], i) => add({ type: 'rock', x0: out ? bcx : fx, y0: out ? bcy : 120, x, y: y - 10, dur: .16 + i * .03, col: '#ff7a1a' }));
   } else if (bo.k === 'treant') {
     if (ph === 0) add({ type: 'shock', x: fx, y: gy, dur: .45, col: '#62a038', to: 20 });
     else tx.forEach(([x, y]) => add({ type: 'roots', x, y, dur: .55, fire: ph >= 2 }));
@@ -2086,7 +2315,7 @@ function bossAttackFx(f, targets, slam) {
     add({ type: 'arc', x: 90, y: 200, dur: .32, col: ph >= 2 ? '#8a2ad0' : ph ? '#ff4a5a' : '#e4ecf6', r: 90 });
     if (ph >= 2) add({ type: 'wave', x: fx, y: gy, dur: .5, col: '#8a2ad0' });
   } else {
-    tx.forEach(([x, y], i) => { for (let k = 0; k < (ph >= 3 ? 4 : 2); k++) add({ type: 'shard', x0: f.x - 40 + rnd(-20, 20), y0: 120 + rnd(-40, 40), x: x + rnd(-6, 6), y: y - 20 + rnd(-8, 8), dur: .16 + k * .02, col: ph ? '#e0b0ff' : '#86ccec' }); });
+    tx.forEach(([x, y], i) => { for (let k = 0; k < (ph >= 3 ? 4 : 2); k++) add({ type: 'shard', x0: (out ? bcx : f.x - 40) + rnd(-20, 20), y0: (out ? bcy : 120) + rnd(-40, 40), x: x + rnd(-6, 6), y: y - 20 + rnd(-8, 8), dur: .16 + k * .02, col: ph ? '#e0b0ff' : '#86ccec' }); });
     if (ph >= 2) add({ type: 'arc', x: 90, y: 200, dur: .3, col: '#e8e0ff', r: 80, flip: 1 });
   }
 }
@@ -2116,6 +2345,16 @@ function drawBossFx(e) {
     ctx.globalAlpha = a;
     for (let k = 0; k < 10; k++) { const h = 10 + ((k * 7 + Math.floor(B.t * 20)) % 5) * 4; rect(x + k * 5, e.y - h, 4, h, k % 2 ? e.col : '#3c0e52'); rect(x + k * 5 + 1, e.y - h, 2, 2, '#e6a8ff'); }
     ctx.globalAlpha = 1;
+  } else if (e.type === 'reach') { // segmented arm from the boss outside, through the frame breach, to the target
+    const k = p < .45 ? ease(p / .45) : p < .7 ? 1 : 1 - ease((p - .7) / .3), pts = [[e.x0, e.y0], [e.ex, e.ey], [e.x, e.y]];
+    const L1 = Math.hypot(e.ex - e.x0, e.ey - e.y0), L2 = Math.hypot(e.x - e.ex, e.y - e.ey), reach = (L1 + L2) * k;
+    for (let d = 0; d < reach; d += 3) {
+      const [a, b, q] = d < L1 ? [pts[0], pts[1], d / L1] : [pts[1], pts[2], (d - L1) / L2];
+      const x = a[0] + (b[0] - a[0]) * q, y = a[1] + (b[1] - a[1]) * q, w = d < L1 ? 7 : 5;
+      rect(x - w / 2, y - w / 2, w, w, '#1a1420'); rect(x - w / 2 + 1, y - w / 2 + 1, w - 3, w - 3, (d / 3) % 4 < 2 ? e.col : darken(e.col, .35));
+    }
+    if (k > .1) { rect(e.ex - 5, e.ey - 5, 10, 10, '#ffffff'); ctx.globalAlpha = .5; rect(e.ex - 9, e.ey - 9, 18, 18, e.col); ctx.globalAlpha = 1; }
+    if (p > .4 && p < .6) { rect(e.x - 8, e.y - 1, 16, 2, '#ffffff'); rect(e.x - 1, e.y - 8, 2, 16, '#ffffff'); }
   } else if (e.type === 'shard') {
     const k = Math.min(1, p * 2.4), x = e.x0 + (e.x - e.x0) * k, y = e.y0 + (e.y - e.y0) * k;
     if (k < 1) { rect(x - 3, y - 1, 6, 2, e.col); rect(x - 1, y - 3, 2, 6, e.col); rect(x - 1, y - 1, 2, 2, '#ffffff'); rect(x + 4, y, 6, 1, darken(e.col, .3)); }
@@ -2124,7 +2363,7 @@ function drawBossFx(e) {
 }
 // draw the boss body: transforms, flicker, reassembly, orbiting shards, glitch rows
 function drawBossBody(f, x, y) {
-  const bo = B.boss, pose = bossPose(f), sc = PSC, X = x - sc, Y = y - sc;
+  const bo = B.boss, pose = bossPose(f), sc = f.sc || PSC, X = x - sc, Y = y - sc;
   let cv = bossFrame(bo.k, bo.phase, pose); f._cv = cv;
   const W = cv.width * sc, H = cv.height * sc, flash = f.flash > 0;
   // aura behind (rage / spirit) from phase 1 on
@@ -2395,7 +2634,7 @@ function panel(x, y, w, h, col = '#3a3a44') {
 }
 function goto(s) { scene = s; selItem = null; selSkill = null; evoPick = null; SFX.click(); persist(); }
 function tabs(y = 4) {
-  save.party.forEach((id, i) => btn(124 + i * 64, y, 60, 18, CLS[id].n, () => { tab = id; selItem = null; selSkill = null; SFX.click(); }, { sel: tab === id, badge: scene === 'skills' && (canEvolve(save.chars[id]) || newlyLit(save.chars[id]).length > 0) }));
+  if (save.party.length > 1) save.party.forEach((id, i) => btn(124 + i * 64, y, 60, 18, CLS[id].n, () => { tab = id; selItem = null; selSkill = null; SFX.click(); }, { sel: tab === id, badge: scene === 'skills' && (canEvolve(save.chars[id]) || newlyLit(save.chars[id]).length > 0) }));
   if (!save.party.includes(tab)) tab = save.party[0];
 }
 function backBtn() { btn(8, 292, 70, 22, 'Back', () => goto('camp')); }
@@ -2406,7 +2645,7 @@ function drawTitle() {
   T('W.A.M.', 160, 54, '#ffffff', 4, 'c', '#24242c');
   const bob = Math.floor(gtime * 2) % 2;
   rect(160 - 22, 196, 44, 3, '#16161c');
-  drawChar(save.chars.warrior, 160 - 30, 136 - bob, 5);
+  drawChar(save.chars[save.party[0]], 160 - 30, 136 - bob, 5);
   const ph = (gtime % 2.4) / 2.4; // sword glint travelling up the blade
   if (ph < .35) { const gy = 136 - bob + Math.round((5 - ph / .35 * 5)) * 5 + 5; rect(160 + 20, gy, 5, 5, '#ffffff'); rect(160 + 17, gy + 2, 11, 1, '#ffffff'); rect(160 + 22, gy - 3, 1, 11, '#ffffff'); }
   const has = save.started;
@@ -2414,9 +2653,9 @@ function drawTitle() {
     btn(105, 222, 110, 22, 'Continue', () => { confirmNew = 0; goto('camp'); });
     btn(105, 250, 110, 22, confirmNew ? 'Sure? tap again' : 'New game', () => {
       if (!confirmNew) { confirmNew = 1; SFX.click(); return; }
-      const m = save.mute; newSave(); save.mute = m; save.started = true; confirmNew = 0; persist(); goto('camp');
+      confirmNew = 0; goto('select');
     }, { col: confirmNew ? COL.red : COL.white });
-  } else btn(105, 236, 110, 24, 'Start', () => { save.started = true; goto('camp'); });
+  } else btn(105, 236, 110, 24, 'Start', () => goto('select'));
   if (Math.floor(gtime * 2) % 2 === 0) T(TOUCH ? 'tap to begin' : 'press J', 160, 290, COL.dim, 1, 'c');
   T('test build', 312, 306, '#2e2e38', 1, 'r');
 }
@@ -2463,23 +2702,19 @@ function drawCamp() {
   T('Foes: ' + names.join(', '), 16, py + 21, COL.dim);
   T('Foe level ' + (save.sel + 1) + '   3 waves' + (save.sel % 3 === 2 ? ' + boss' : ''), 16, py + 34, COL.dim);
   // party
-  const qy = py + 54;
-  ORDER.forEach((id, i) => {
-    const x = 8 + i * 102, c = save.chars[id], got = save.party.includes(id), cx = x + 50;
-    panel(x, qy, 100, 222 + 52 - qy, id === save.active && got ? '#5a5a6a' : '#2a2a32');
-    const bob = got && !RM ? Math.floor(gtime * 2 + i) % 2 : 0;
-    if (c && got) drawChar(c, cx - 18, qy + 4 - bob, 2, '', { seed: i }); else drawSpr(CLS[id].spr, cx - 18, qy + 4 - bob, 2, 'dim');
-    if (got) {
-      T(charName(c), cx, qy + 42, id === save.active ? COL.white : COL.dim, 1, 'c');
-      T(canEvolve(c) && Math.floor(gtime * 3) % 2 ? 'evolve!' : 'Lv ' + c.lvl, cx, qy + 54, canEvolve(c) ? COL.gold : COL.dim, 1, 'c');
-    }
-  });
+  const qy = py + 54, hc = save.chars[save.cls], hs = calcStats(hc);
+  panel(8, qy, 304, 274 - qy, '#5a5a6a');
+  const bob = RM ? 0 : Math.floor(gtime * 2) % 2;
+  drawChar(hc, 20, qy + 6 - bob, 3, '', { seed: 1 });
+  T(charName(hc), 84, qy + 8, TINT[save.cls]); T('Lv ' + hc.lvl + '   ' + hc.xp + '/' + xpNeed(hc.lvl) + ' xp', 84, qy + 22, COL.dim);
+  bar(84, qy + 34, 140, 3, hc.xp / xpNeed(hc.lvl), TINT[save.cls]);
+  T('DMG ' + Math.round(hs.dmg) + '  LIFE ' + hs.hp + '  ARM ' + hs.arm, 84, qy + 42, COL.white);
+  if (canEvolve(hc) && Math.floor(gtime * 3) % 2) T('evolve!', 304, qy + 8, COL.gold, 1, 'r');
   const anySp = save.party.some(id => canEvolve(save.chars[id]) || newlyLit(save.chars[id]).length > 0);
-  const anyEvo = save.party.some(id => canEvolve(save.chars[id]));
   btn(8, 280, 88, 32, TOUCH ? 'Fight' : 'Fight (J)', () => startLevel(save.sel), { border: COL.gold, col: COL.gold });
-  btn(102, 280, 66, 32, 'Gear', () => { tab = save.active; goto('gear'); });
-  btn(174, 280, 66, 32, 'Skills', () => { tab = save.active; goto('skills'); }, { badge: anySp });
-  btn(246, 280, 66, 32, 'Party', () => goto('party'), { badge: anyEvo });
+  btn(102, 280, 66, 32, 'Gear', () => { tab = save.cls || save.party[0]; goto('gear'); });
+  btn(174, 280, 66, 32, 'Skills', () => { tab = save.cls || save.party[0]; goto('skills'); }, { badge: anySp });
+  btn(246, 280, 66, 32, 'Menu', () => { confirmNew = 0; goto('title'); });
 }
 // ---------- gear ----------
 function equip(it) {
@@ -2713,6 +2948,41 @@ function drawMsg() {
   if (Math.floor(gtime * 2) % 2 === 0) T(TOUCH ? 'tap to continue' : 'J to continue', 160, 296, COL.dim, 1, 'c');
   hit(0, 0, LW, LH, nextMsg);
 }
+
+// ---------- class select: one hero per save ----------
+const CLASSPICK = [
+  { id: 'archer', tag: ['Draw, hold, loose.', 'Release on the ring.'] },
+  { id: 'warrior', tag: ['Steel and nerve.', 'Strike on the gold.'] },
+  { id: 'mage', tag: ['Trace the runes.', 'Hit each glowing one.'] },
+];
+let selHover = 'warrior';
+const _demoC = {};
+function demoChar(id) { if (!_demoC[id]) { const c = newChar(id, 1); const w = makeItem(1, 'weapon', id); w.rar = 0; w.lk = 0; c.gear.weapon = w; _demoC[id] = c; } return _demoC[id]; }
+function drawMechDemo(id, cx, cy, t) {
+  if (id === 'warrior') { rect(cx - 36, cy - 4, 72, 8, '#09080c'); frame(cx - 37, cy - 5, 74, 10, '#ffd35a'); rect(cx + 2, cy - 3, 14, 6, '#2f6a3a'); rect(cx + 7, cy - 3, 4, 6, COL.gold); const m = (Math.sin(t * 3) + 1) / 2; const x = Math.round(cx - 35 + m * 69); rect(x, cy - 8, 2, 2, '#ffd35a'); rect(x - 2, cy - 6, 6, 1, '#ffd35a'); rect(x, cy - 5, 2, 12, '#ffffff'); }
+  else if (id === 'archer') { for (let k = 0; k <= 30; k++) { const u = k / 30; rect(Math.round(cx - 32 + u * 64), Math.round(cy + 4 - Math.sin(u * 2.7 + .2) * 8), 1, 1, '#2a3a24'); }
+    const u = (t * .6) % 1.2, uu = Math.min(1, u), ax = Math.round(cx - 32 + uu * 64), ay = Math.round(cy + 4 - Math.sin(uu * 2.7 + .2) * 8); ringPx(cx + 20, Math.round(cy + 4 - Math.sin(.81 * 2.7 + .2) * 8), 4, '#7ee07e'); rect(ax - 5, ay, 6, 1, '#a0743a'); rect(ax + 1, ay - 1, 2, 3, '#d8dce8'); rect(ax - 6, ay - 1, 2, 1, '#5ac85a');
+    for (let k = -8; k <= 8; k++) rect(cx - 38 + Math.round(k * k / 20), cy + k, 1, 1, '#b07a3a'); }
+  else { ringPx(cx, cy, 10, '#8a5ad8'); ringPx(cx, cy, 6, '#2e2244'); const a = t * 2.4; rect(Math.round(cx + Math.cos(a) * 10) - 1, Math.round(cy + Math.sin(a) * 10) - 1, 3, 3, '#d6a6ff'); for (const r of [.5, 2.6, 4.4]) rect(Math.round(cx + Math.cos(r) * 14) - 1, Math.round(cy + Math.sin(r) * 14) - 1, 3, 3, Math.floor(t * 3) % 2 ? '#ffffff' : '#b48cff'); }
+}
+function drawSelect() {
+  drawArena(); bigTitle();
+  T('Choose your hero', 160, 30, COL.white, 1, 'c'); T('one hero per save, locked once chosen', 160, 42, COL.dark, 1, 'c');
+  CLASSPICK.forEach((P, i) => {
+    const x = 8 + i * 102, y = 58, w = 100, h = 214, sel = selHover === P.id, col = TINT[P.id];
+    panel(x, y, w, h, sel ? col : '#2a2a32');
+    const bob = RM ? 0 : Math.floor(gtime * 2.5 + i) % 2;
+    rect(x + 30, y + 92, 40, 3, '#16161c');
+    drawChar(demoChar(P.id), x + 50 - 27, y + 36 - bob, 3, '', { seed: i });
+    T(CLS[P.id].n, x + 50, y + 104, col, 1, 'c');
+    drawMechDemo(P.id, x + 50, y + 136, RM ? 1 : gtime + i);
+    T(P.id === 'archer' ? 'bow draw' : P.id === 'mage' ? 'rune circle' : 'sword bar', x + 50, y + 156, COL.dim, 1, 'c');
+    wrap(P.tag.join(' '), 92).slice(0, 4).forEach((l, k) => T(l, x + 50, y + 170 + k * 11, COL.white, 1, 'c'));
+    hit(x, y, w, h, () => { if (selHover === P.id) { chooseClass(P.id); SFX.lvl(); goto('camp'); } else { selHover = P.id; SFX.click(); } });
+  });
+  btn(8, 280, 92, 32, 'Back', () => goto('title'));
+  btn(108, 280, 204, 32, 'Play as ' + CLS[selHover].n, () => { chooseClass(selHover); SFX.lvl(); goto('camp'); }, { col: TINT[selHover], border: TINT[selHover] });
+}
 // ================= battle drawing =================
 function drawBattle() {
   const A = ACTS[B.act];
@@ -2802,7 +3072,7 @@ function drawFoe(f, i) {
     const bw = 46, byy = f.y - 228;
     if (B.boss.st === 'fight') { bar(f.x - bw / 2 - 20, f.y + 6, bw, 2, f.wind > 0 ? 1 : 1 - f.timer / f.per, f.wind > 0 ? '#ffffff' : '#7a3a3a', '#16161c'); if (f.wind > 0) T('!', f.x - 20 - bw / 2 - 8, f.y + 2, COL.red, 1, 'c', '#000'); }
     if (f.burnT > 0) rect(f.x + 8, f.y + 6, 3, 3, '#ff9a3a'); if (f.chill > 0) rect(f.x + 14, f.y + 6, 3, 3, '#9fe6f4');
-    hit(f.x - 90, f.y - 220, 180, 224, () => { B.target = i; SFX.click(); });
+    hit(f.x - BW * f.sc * .45, f.y - BH * f.sc, BW * f.sc * .9, BH * f.sc + 4, () => { B.target = i; SFX.click(); });
     return;
   }
   if (f.wind > 0 && !RM && Math.floor(B.t * 30) % 3 === 0) { const [cx, cy] = foeCenter(f), an = rnd(Math.PI * 2); B.parts.push({ x: cx + Math.cos(an) * 26, y: cy + Math.sin(an) * 26, vx: -Math.cos(an) * 90, vy: -Math.sin(an) * 90, t: 0, life: .28, col: '#ff5a5a', s: 1, g: 0 }); }
@@ -2843,7 +3113,7 @@ function drawFx(e) {
     const a = 1 - p; ctx.globalAlpha = a; rect(e.x - 6, 0, 12, e.y, '#ffe070'); rect(e.x - 2, 0, 4, e.y, '#ffffff'); ctx.globalAlpha = 1;
   } else if (e.type === 'nova') {
     const s = Math.round(8 + p * 90); ctx.globalAlpha = 1 - p; frame(e.x - s, e.y - s * .6, s * 2, s * 1.2, e.col); frame(e.x - s + 3, e.y - s * .6 + 3, s * 2 - 6, s * 1.2 - 6, '#ffffff'); ctx.globalAlpha = 1;
-  } else if (['shock', 'rock', 'roots', 'arc', 'wave', 'shard'].includes(e.type)) { drawBossFx(e);
+  } else if (['shock', 'rock', 'roots', 'arc', 'wave', 'shard', 'reach'].includes(e.type)) { drawBossFx(e);
   } else if (e.type === 'ring') {
     const s = Math.round(4 + p * 22); ctx.globalAlpha = 1 - p; frame(e.x - s, e.y - s, s * 2, s * 2, e.col); ctx.globalAlpha = 1;
   } else if (e.type === 'drop') {
@@ -2877,10 +3147,11 @@ function drawHud() {
   const au = activeUnit();
   if (au) T(charName(au.c), 312, 259, TINT[au.id], 1, 'r');
   drawTimingBar(au);
-  if (!TOUCH) T('J strike   1 2 3 swap   Esc menu', 160, 305, '#4a4452', 1, 'c');
+  if (!TOUCH) { const m = mechOf(au); T(m === 'bow' ? 'hold J, let go on the ring   Esc menu' : m === 'rune' ? 'J on each glowing rune   Esc menu' : 'J strike   Esc menu', 160, 305, '#4a4452', 1, 'c'); }
 }
 const TINT = { warrior: '#ffd35a', archer: '#7ee07e', mage: '#b48cff' };
 function drawTimingBar(au) {
+  const mech = mechOf(au); if (mech !== 'sword') return drawAltBar(au, mech);
   const W = 228, H = 12, Y = 285, ready = B.cd <= 0 && B.state === 'fight', { g, p } = zones();
   const tint = au ? TINT[au.id] : '#8a8a96', pat = bossPat() || {};
   const X = 46 + (B.barShake > 0 && !RM ? Math.round(rnd(-2, 2) * B.barShake / .3) : 0);
@@ -2990,8 +3261,7 @@ function drawStrip() {
   const y = AH + 6, h = STRIP - 12;
   if (scene === 'battle' && B && !B.paused && (B.state === 'fight' || B.state === 'intro' || B.state === 'clear' || B.state === 'boss')) {
     const ready = B.cd <= 0 && B.state === 'fight';
-    btn(8, y, 196, h, 'STRIKE', strike, { sc: 2, col: ready ? COL.gold : COL.dim, border: ready ? COL.gold : '#3a3a44', fill: ready ? '#16140a' : '#0c0c10' });
-    btn(210, y, 50, h, 'Swap', cycleUnit, { dis: B.units.filter(u => !u.dead).length < 2 });
+    btn(8, y, 250, h, mechOf(activeUnit()) === 'bow' ? (B.drawing ? 'LOOSE' : 'DRAW') : mechOf(activeUnit()) === 'rune' ? 'CAST' : 'STRIKE', pressJ, { sc: 2, col: ready ? COL.gold : COL.dim, border: ready ? COL.gold : '#3a3a44', fill: ready ? '#16140a' : '#0c0c10' });
     btn(266, y, 46, h, 'Menu', () => { B.paused = true; SFX.click(); });
   } else if (scene === 'title' || scene === 'msg' || (scene === 'battle' && B && (B.state === 'win' || B.state === 'lose') && B.st <= 0)) {
     btn(8, y, 304, h, 'Continue', onJ, { sc: 2 });
@@ -3003,13 +3273,14 @@ function drawStrip() {
 // ================= loop & input =================
 function onJ() {
   audio();
-  if (scene === 'title') { confirmNew = 0; save.started = true; goto('camp'); }
+  if (scene === 'title') { confirmNew = 0; goto(save.cls ? 'camp' : 'select'); }
+  else if (scene === 'select') { chooseClass(selHover); goto('camp'); }
   else if (scene === 'camp') startLevel(save.sel);
   else if (scene === 'msg') nextMsg();
   else if (scene === 'battle' && B) {
     if (B.paused) return;
     if ((B.state === 'win' || B.state === 'lose') && B.st <= 0) leaveBattle();
-    else strike();
+    else pressJ();
   }
 }
 addEventListener('keydown', e => {
@@ -3046,7 +3317,7 @@ cv.addEventListener('pointermove', e => {
   if (scene === 'skills' && ptrs.size === 2 && pinch0) { const [a, b] = [...ptrs.values()], d = Math.hypot(a.x - b.x, a.y - b.y); if (d > pinch0 * 1.4) { treeZoom(1); pinch0 = d; } else if (d < pinch0 / 1.4) { treeZoom(-1); pinch0 = d; } return; }
   if (scene === 'skills' && treeDrag && ptrs.has(e.pointerId)) { const dx = m.x - treeDrag.x, dy = m.y - treeDrag.y; dragMoved += Math.abs(dx) + Math.abs(dy); treePan(dx, dy); treeDrag = { x: m.x, y: m.y }; }
 });
-const endPtr = e => { ptrs.delete(e.pointerId); if (ptrs.size < 2) pinch0 = 0; if (dragPend && dragMoved < 6) dragPend.fn(); dragPend = null; treeDrag = null; };
+const endPtr = e => { ptrs.delete(e.pointerId); if (scene === 'battle') releaseJ(); if (ptrs.size < 2) pinch0 = 0; if (dragPend && dragMoved < 6) dragPend.fn(); dragPend = null; treeDrag = null; };
 cv.addEventListener('pointerup', endPtr); cv.addEventListener('pointercancel', endPtr);
 cv.addEventListener('wheel', e => { if (scene !== 'skills') return; e.preventDefault(); if (e.ctrlKey || Math.abs(e.deltaY) > 40 && !e.shiftKey && e.deltaMode === 0 && Math.abs(e.deltaX) < 1 && false) treeZoom(e.deltaY < 0 ? 1 : -1); else if (e.altKey) treeZoom(e.deltaY < 0 ? 1 : -1); else treePan(-e.deltaX * .5, -e.deltaY * .5); }, { passive: false });
 cv.addEventListener('contextmenu', e => e.preventDefault());
@@ -3054,17 +3325,19 @@ document.addEventListener('visibilitychange', () => { if (document.hidden && B &
 
 let last = performance.now();
 function drawVoid() {
-  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, VW, VH); ctx.fillStyle = '#0e0d12';
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, VW, VH); if (drawBackdrop()) return; ctx.fillStyle = '#0e0d12';
   for (let y = ((OY % 8) + 8) % 8; y < VH; y += 8) for (let x = ((OX % 8) + 8) % 8; x < VW; x += 8) ctx.fillRect(x, y, 1, 1);
 }
 const WAM = window.WAM = { toCss: (x, y) => { const r = cv.getBoundingClientRect(); return { x: r.left + (x + OX) * r.width / VW, y: r.top + (y + OY) * r.height / VH }; }, get save() { return save; }, get B() { return B; }, get scene() { return scene; }, startLevel, strike, zones, switchTo, onJ, TUNE, bot: 0, timeScale: 1, goto: s => { scene = s; } };
 function botTick() {
   // test helper only: WAM.bot = accuracy 0..1 auto-presses J for recordings/tests
   if (!WAM.bot || !B || B.state !== 'fight' || B.paused || B.cd > 0) return;
-  const { p, g } = zones(), d = Math.abs(B.mk - B.zc);
+  const { p, g } = zones(), d = aimD(), m = mechOf(activeUnit());
+  if (m === 'bow' && !B.drawing) { pressJ(); B.tapMode = true; return; }
   if (!B._botAim) B._botAim = Math.random() < WAM.bot ? p * .35 : Math.random() < .6 ? g * .42 : 1;
-  if (d <= B._botAim) { strike(); B._botAim = 0; }
-  else if (B._botAim >= 1 && Math.random() < .02) { strike(); B._botAim = 0; }
+  const go = () => { if (m === 'bow') bowRelease(); else strike(); B._botAim = 0; };
+  if (d <= B._botAim) go();
+  else if (B._botAim >= 1 && Math.random() < .02) go();
 }
 function loop(now) {
   let dt = Math.min(.05, (now - last) / 1000) * WAM.timeScale; last = now; gtime += dt;
@@ -3081,6 +3354,7 @@ function loop(now) {
     else if (scene === 'gear') drawGear();
     else if (scene === 'skills') drawSkills();
     else if (scene === 'party') drawParty();
+    else if (scene === 'select') drawSelect();
     else if (scene === 'msg') drawMsg();
     else if (scene === 'battle' && B) drawBattle();
     drawStrip();
@@ -3091,9 +3365,84 @@ function loop(now) {
 loadSave();
 if (DEBUG) {
   // ?debug : everything unlocked for tweaking
+  const dc = (Q.match(/cls=(\w+)/) || [])[1]; if (!save.cls || dc && dc !== save.cls) { chooseClass(dc && CLS[dc] ? dc : 'warrior'); }
   save.started = true; save.unlocked = 11; save.act4 = true; save.cleared = save.cleared.map((c, i) => i < 9 ? true : c);
-  ['archer', 'mage'].forEach(addChar); if (!save.goblets.length) save.goblets = ['blue', 'green', 'red'];
+  if (!save.goblets.length) save.goblets = ['blue', 'green', 'red'];
   save.party.forEach(id => { const c = save.chars[id]; if (c.lvl < 14) c.lvl = 14; });
   save.perfects = Math.max(save.perfects, TUNE.act4Perfects);
 }
 requestAnimationFrame(loop);
+addEventListener('keyup', e => { if (e.code === 'KeyJ' || e.code === 'Space' || e.code === 'Enter') releaseJ(); });
+
+// ---------- archer bow draw and mage rune circle ----------
+function ringPx(cx, cy, r, col, step) { const n = Math.max(8, Math.round(r * 6.3 / (step || 1))); for (let i = 0; i < n; i++) { const a = i / n * Math.PI * 2; rect(Math.round(cx + Math.cos(a) * r), Math.round(cy + Math.sin(a) * r), 1, 1, col); } }
+const bowPt = t => [62 + t * 206, 298 - Math.round(Math.sin(Math.min(1.1, t) * Math.PI * .86 + .2) * 14)];
+function altLabel(lx, ly) {
+  if (!B.label) return;
+  const q = B.label.q, k = 1 - B.label.t / (B.label.rune ? .5 : .7), txt = B.label.rune ? 'rune ' + B.label.rune : q === 'perfect' ? 'Perfect!' : q === 'good' ? 'Good' : 'Miss';
+  const col = q === 'perfect' ? COL.gold : q === 'good' ? COL.green : '#ff6a6a', sc = q === 'perfect' && !B.label.rune && k < .5 ? 2 : 1;
+  ctx.globalAlpha = k > .7 ? (1 - k) / .3 : 1; T(txt, clamp(lx, 40, 280), ly - sc * 6 - Math.round(k * 6), col, sc, 'c', '#000'); ctx.globalAlpha = 1;
+}
+function drawAltBar(au, mech) {
+  const ready = B.cd <= 0 && B.state === 'fight', { g, p } = zones(), pat = bossPat() || {}, bv = unitBar(au);
+  const sh = B.barShake > 0 && !RM ? Math.round(rnd(-2, 2) * B.barShake / .3) : 0;
+  const hidden = pat.blink && Math.floor(B.t * 5) % 3 === 0, pulse = RM ? 0 : (Math.sin(B.t * 8) + 1) / 2;
+  if (mech === 'bow') {
+    // leather-wrapped plate behind the arc
+    rect(40 + sh, 274, 240, 30, '#0a0c08'); frame(40 + sh, 274, 240, 30, ready ? '#3e6a2e' : '#22261c'); rect(41 + sh, 275, 238, 1, '#2a3420');
+    for (let k = 0; k < 4; k++) rect(44 + k * 76 + sh, 301, 3, 1, '#5a3a1a');
+    // dotted flight arc
+    for (let t = 0; t <= 1.1; t += .025) { const [x, y] = bowPt(t); rect(x + sh, y, 1, 1, t > 1 ? '#4a1a1a' : '#2a3a24'); }
+    // good arc + perfect band
+    for (let t = B.zc - g / 2; t <= B.zc + g / 2; t += .006) { const [x, y] = bowPt(t); rect(x - 1 + sh, y - 1, 3, 3, ready ? '#2f6a3a' : '#1a2a1e'); }
+    const band = (zc, col, hi) => { for (let t = zc - p / 2; t <= zc + p / 2; t += .004) { const [x, y] = bowPt(t); rect(x - 1 + sh, y - 2, 3, 4, col); rect(x + sh, y - 2, 1, 1, hi); } };
+    if (!hidden) { band(B.zc, ready ? (pulse > .6 ? '#ffe27a' : COL.gold) : '#5a4a20', '#fff4b8'); if (bv === 'twin') band(B.zc2, ready ? '#ffd35a' : '#5a4a20', '#fff4b8'); }
+    // target ring at the sweet spot
+    const [tx, ty] = bowPt(B.zc); ringPx(tx + sh, ty, 6, ready ? '#7ee07e' : '#2a3a24'); ringPx(tx + sh, ty, 4, ready ? '#c03a2a' : '#3a1a14'); rect(tx - 1 + sh, ty - 1, 2, 2, ready ? '#ffffff' : '#4a4a54');
+    if (bv === 'snipe' && ready) { ctx.globalAlpha = .6; rect(tx - 9 + sh, ty, 4, 1, '#ff5a5a'); rect(tx + 6 + sh, ty, 4, 1, '#ff5a5a'); rect(tx + sh, ty - 9, 1, 4, '#ff5a5a'); rect(tx + sh, ty + 6, 1, 4, '#ff5a5a'); ctx.globalAlpha = 1; }
+    // the bow: wood limbs with grip and fletching tint, string pulled back with the draw
+    const bx = 52 + sh, by = 289, pull = Math.round(Math.min(1, B.mk) * 7) + (B.mk > 1 && !RM ? Math.round(rnd(-1, 1)) : 0);
+    for (let k = -13; k <= 13; k++) { const x = bx + Math.round(Math.abs(k) * Math.abs(k) / 42); rect(x, by + k, 2, 1, Math.abs(k) < 3 ? '#3a2412' : k < 0 ? '#b07a3a' : '#7a4a20'); rect(x, by + k, 1, 1, Math.abs(k) < 3 ? '#5a3a1a' : '#d8a45a'); }
+    const sx = bx - pull; for (let k = -12; k <= 12; k++) rect(Math.round(bx + 4 + (sx - bx - 4) * (1 - Math.abs(k) / 12)), by + k, 1, 1, '#e8e0c8');
+    // the arrow: rides the arc as tension builds
+    const t = B.drawing ? B.mk : 0, [ax, ay] = B.drawing ? bowPt(t) : [bx + 10, by], [bx2, by2] = B.drawing ? bowPt(Math.max(0, t - .05)) : [bx - pull, by];
+    const dx = ax - bx2, dy = ay - by2, L = Math.max(1, Math.hypot(dx, dy)), ux = dx / L, uy = dy / L, shk = B.mk > 1 && !RM ? rnd(-1, 1) : 0;
+    for (let k = 0; k < 11; k++) rect(Math.round(ax - ux * k + sh + shk), Math.round(ay - uy * k), 1, 1, '#a0743a');
+    rect(Math.round(ax + sh + shk), Math.round(ay) - 1, 2, 3, '#d8dce8'); rect(Math.round(ax + ux * 2 + sh + shk), Math.round(ay), 1, 1, '#ffffff');
+    for (let k = 9; k < 12; k++) { rect(Math.round(ax - ux * k + sh + shk), Math.round(ay - uy * k) - 2, 1, 2, '#5ac85a'); rect(Math.round(ax - ux * k + sh + shk), Math.round(ay - uy * k) + 1, 1, 2, '#e8f8e0'); }
+    if (B.drawing) { const k = Math.min(1, B.mk); rect(44 + sh, 277, Math.round(36 * k), 2, B.mk > 1 ? '#ff5a5a' : '#7ee07e'); T('draw', 84 + sh, 276, COL.dark); }
+    else if (ready) T(TOUCH ? 'hold DRAW' : 'hold J', 84 + sh, 276, Math.floor(B.t * 2) % 2 ? '#7ee07e' : '#3e6a2e');
+    if (B.flash) { const k = B.flash.t / .3, [fx, fy] = bowPt(B.flash.x), c = B.flash.q === 'perfect' ? COL.gold : B.flash.q === 'good' ? COL.green : '#ff5a5a'; for (let i = 0; i < 10; i++) { const a = i * .63, r = (1 - k) * 14; rect(Math.round(fx + Math.cos(a) * r), Math.round(fy + Math.sin(a) * r), 2, 2, c); } }
+    if (!ready && B.state === 'fight' && au && !B.drawing) bar(44, 300, 232, 1, 1 - B.cd / au.s.cd, '#3e6a2e', '#000');
+    const [lx, ly] = bowPt(B.label ? B.label.x : .5); altLabel(lx, ly - 8);
+  } else {
+    const cx = 160 + sh, cy = 286, R = 12, ang = t => t * Math.PI * 2 - Math.PI / 2, P = t => [Math.round(cx + Math.cos(ang(t)) * R), Math.round(cy + Math.sin(ang(t)) * R)];
+    const frost = bv === 'frost' && B.slowT > 0;
+    // arcane disc with dithered shade lit from the upper left
+    for (let y = -16; y <= 16; y++) for (let x = -16; x <= 16; x++) { const d = Math.hypot(x, y); if (d > 16.5) continue; const lit = (-x - y) / 23; rect(cx + x, cy + y, 1, 1, d > 15.5 ? (ready ? '#6a3ab0' : '#2a1a40') : d > 13.5 && d < 10.5 ? '#000' : ((x + y) & 1) && lit > .3 ? '#1e1430' : frost ? '#0e1a24' : '#0e0a16'); }
+    ringPx(cx, cy, 15, ready ? '#8a5ad8' : '#2e2244'); ringPx(cx, cy, 9, '#2e2244');
+    // good arc and perfect arc on the orbit
+    for (let t = B.zc - g / 2; t <= B.zc + g / 2; t += .01) { const [x, y] = P(t); rect(x - 1, y - 1, 2, 2, ready ? '#4a2a8a' : '#1e1630'); }
+    if (!hidden) for (let t = B.zc - p / 2; t <= B.zc + p / 2; t += .006) { const [x, y] = P(t); rect(x - 1, y - 1, 3, 3, ready ? (pulse > .6 ? '#ffe27a' : COL.gold) : '#5a4a20'); }
+    // 12 rune glyphs; the ones this cast needs glow, lit ones turn gold
+    const GL = [[1, 0, 1, 0, 1, 0, 1, 0, 1], [0, 1, 0, 1, 1, 1, 0, 1, 0], [1, 1, 0, 0, 1, 0, 0, 1, 1], [1, 0, 0, 1, 1, 0, 1, 0, 0], [0, 1, 1, 0, 1, 0, 1, 1, 0], [1, 1, 1, 0, 1, 0, 0, 1, 0]];
+    for (let i = 0; i < 12; i++) { const t = i / 12, a = ang(t), x = Math.round(cx + Math.cos(a) * 19), y = Math.round(cy + Math.sin(a) * 19); GL[i % 6].forEach((on, j) => on && rect(x - 1 + j % 3, y - 1 + Math.floor(j / 3), 1, 1, '#3a2a58')); }
+    B.runes.forEach((r, i) => {
+      const done = i < B.runeQ.length, cur = i === B.runeQ.length, a = ang(done || !cur ? r : B.zc), x = Math.round(cx + Math.cos(a) * 19), y = Math.round(cy + Math.sin(a) * 19);
+      const c = done ? COL.gold : cur ? (ready ? (pulse > .5 ? '#ffffff' : '#d6a6ff') : '#5a4a7a') : '#8a5ad8';
+      rect(x - 2, y - 2, 5, 5, '#000'); GL[(i * 2 + 1) % 6].forEach((on, j) => on && rect(x - 1 + j % 3, y - 1 + Math.floor(j / 3), 1, 1, c));
+      if (cur && ready && !RM) { ctx.globalAlpha = .3; ringPx(x, y, 4, '#d6a6ff'); ctx.globalAlpha = 1; }
+    });
+    if (B.runes.length > 1) T(B.runeQ.length + '/' + B.runes.length, cx + 24, cy - 4, '#b48cff');
+    // the orbiting spark with a trail
+    if (!RM) for (let k = 1; k < 7; k++) { const [x, y] = P(B.mk - B.md * k * .012); ctx.globalAlpha = .5 - k * .07; rect(x, y, 1, 1, frost ? '#9fe6f4' : '#b48cff'); } ctx.globalAlpha = 1;
+    const [sx, sy] = P(B.mk); rect(sx - 1, sy - 1, 3, 3, ready ? (frost ? '#9fe6f4' : '#d6a6ff') : '#4a3a5a'); rect(sx, sy, 1, 1, '#ffffff');
+    if (bv === 'heat') for (let k = 0; k < 5; k++) { const on = k < B.heat, gl = B.heat >= 5 && !RM && Math.floor(B.t * 8) % 2; rect(cx - 50 + k * 6, cy + 10, 4, 3, on ? (gl ? '#fff3a8' : '#ff7a1a') : '#2a1a14'); }
+    if (frost) T('slow', cx - 46, cy - 4, '#9fe6f4');
+    if (B.flash) { const k = B.flash.t / .3, [fx, fy] = P(B.flash.x), c = B.flash.q === 'perfect' ? COL.gold : B.flash.q === 'good' ? COL.green : '#ff5a5a'; for (let i = 0; i < 10; i++) { const a = i * .63, r = (1 - k) * 12; rect(Math.round(fx + Math.cos(a) * r), Math.round(fy + Math.sin(a) * r), 2, 2, c); } if (B.flash.q === 'miss') { ctx.globalAlpha = k * .4; ringPx(cx, cy, 15, '#ff5a5a'); ctx.globalAlpha = 1; } }
+    if (!ready && B.state === 'fight' && au) { const k = 1 - B.cd / au.s.cd; for (let i = 0; i < 24 * k; i++) { const a = i / 24 * Math.PI * 2 - Math.PI / 2; rect(Math.round(cx + Math.cos(a) * 6), Math.round(cy + Math.sin(a) * 6), 1, 1, '#6a4a9a'); } }
+    altLabel(cx, cy - 22);
+  }
+  if (!TOUCH) { slotBox(14, 283, 18, 16, ready ? TINT[au.id] : null); T('J', 23, 286, ready ? COL.white : COL.dim, 1, 'c'); }
+  if (B.streak >= 2) T('x' + B.streak, 306, 286, COL.gold, 1, 'r');
+}

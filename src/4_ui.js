@@ -80,7 +80,7 @@ function panel(x, y, w, h, col = '#3a3a44') {
 }
 function goto(s) { scene = s; selItem = null; selSkill = null; evoPick = null; SFX.click(); persist(); }
 function tabs(y = 4) {
-  save.party.forEach((id, i) => btn(124 + i * 64, y, 60, 18, CLS[id].n, () => { tab = id; selItem = null; selSkill = null; SFX.click(); }, { sel: tab === id, badge: scene === 'skills' && (canEvolve(save.chars[id]) || newlyLit(save.chars[id]).length > 0) }));
+  if (save.party.length > 1) save.party.forEach((id, i) => btn(124 + i * 64, y, 60, 18, CLS[id].n, () => { tab = id; selItem = null; selSkill = null; SFX.click(); }, { sel: tab === id, badge: scene === 'skills' && (canEvolve(save.chars[id]) || newlyLit(save.chars[id]).length > 0) }));
   if (!save.party.includes(tab)) tab = save.party[0];
 }
 function backBtn() { btn(8, 292, 70, 22, 'Back', () => goto('camp')); }
@@ -91,7 +91,7 @@ function drawTitle() {
   T('W.A.M.', 160, 54, '#ffffff', 4, 'c', '#24242c');
   const bob = Math.floor(gtime * 2) % 2;
   rect(160 - 22, 196, 44, 3, '#16161c');
-  drawChar(save.chars.warrior, 160 - 30, 136 - bob, 5);
+  drawChar(save.chars[save.party[0]], 160 - 30, 136 - bob, 5);
   const ph = (gtime % 2.4) / 2.4; // sword glint travelling up the blade
   if (ph < .35) { const gy = 136 - bob + Math.round((5 - ph / .35 * 5)) * 5 + 5; rect(160 + 20, gy, 5, 5, '#ffffff'); rect(160 + 17, gy + 2, 11, 1, '#ffffff'); rect(160 + 22, gy - 3, 1, 11, '#ffffff'); }
   const has = save.started;
@@ -99,9 +99,9 @@ function drawTitle() {
     btn(105, 222, 110, 22, 'Continue', () => { confirmNew = 0; goto('camp'); });
     btn(105, 250, 110, 22, confirmNew ? 'Sure? tap again' : 'New game', () => {
       if (!confirmNew) { confirmNew = 1; SFX.click(); return; }
-      const m = save.mute; newSave(); save.mute = m; save.started = true; confirmNew = 0; persist(); goto('camp');
+      confirmNew = 0; goto('select');
     }, { col: confirmNew ? COL.red : COL.white });
-  } else btn(105, 236, 110, 24, 'Start', () => { save.started = true; goto('camp'); });
+  } else btn(105, 236, 110, 24, 'Start', () => goto('select'));
   if (Math.floor(gtime * 2) % 2 === 0) T(TOUCH ? 'tap to begin' : 'press J', 160, 290, COL.dim, 1, 'c');
   T('test build', 312, 306, '#2e2e38', 1, 'r');
 }
@@ -148,23 +148,19 @@ function drawCamp() {
   T('Foes: ' + names.join(', '), 16, py + 21, COL.dim);
   T('Foe level ' + (save.sel + 1) + '   3 waves' + (save.sel % 3 === 2 ? ' + boss' : ''), 16, py + 34, COL.dim);
   // party
-  const qy = py + 54;
-  ORDER.forEach((id, i) => {
-    const x = 8 + i * 102, c = save.chars[id], got = save.party.includes(id), cx = x + 50;
-    panel(x, qy, 100, 222 + 52 - qy, id === save.active && got ? '#5a5a6a' : '#2a2a32');
-    const bob = got && !RM ? Math.floor(gtime * 2 + i) % 2 : 0;
-    if (c && got) drawChar(c, cx - 18, qy + 4 - bob, 2, '', { seed: i }); else drawSpr(CLS[id].spr, cx - 18, qy + 4 - bob, 2, 'dim');
-    if (got) {
-      T(charName(c), cx, qy + 42, id === save.active ? COL.white : COL.dim, 1, 'c');
-      T(canEvolve(c) && Math.floor(gtime * 3) % 2 ? 'evolve!' : 'Lv ' + c.lvl, cx, qy + 54, canEvolve(c) ? COL.gold : COL.dim, 1, 'c');
-    }
-  });
+  const qy = py + 54, hc = save.chars[save.cls], hs = calcStats(hc);
+  panel(8, qy, 304, 274 - qy, '#5a5a6a');
+  const bob = RM ? 0 : Math.floor(gtime * 2) % 2;
+  drawChar(hc, 20, qy + 6 - bob, 3, '', { seed: 1 });
+  T(charName(hc), 84, qy + 8, TINT[save.cls]); T('Lv ' + hc.lvl + '   ' + hc.xp + '/' + xpNeed(hc.lvl) + ' xp', 84, qy + 22, COL.dim);
+  bar(84, qy + 34, 140, 3, hc.xp / xpNeed(hc.lvl), TINT[save.cls]);
+  T('DMG ' + Math.round(hs.dmg) + '  LIFE ' + hs.hp + '  ARM ' + hs.arm, 84, qy + 42, COL.white);
+  if (canEvolve(hc) && Math.floor(gtime * 3) % 2) T('evolve!', 304, qy + 8, COL.gold, 1, 'r');
   const anySp = save.party.some(id => canEvolve(save.chars[id]) || newlyLit(save.chars[id]).length > 0);
-  const anyEvo = save.party.some(id => canEvolve(save.chars[id]));
   btn(8, 280, 88, 32, TOUCH ? 'Fight' : 'Fight (J)', () => startLevel(save.sel), { border: COL.gold, col: COL.gold });
-  btn(102, 280, 66, 32, 'Gear', () => { tab = save.active; goto('gear'); });
-  btn(174, 280, 66, 32, 'Skills', () => { tab = save.active; goto('skills'); }, { badge: anySp });
-  btn(246, 280, 66, 32, 'Party', () => goto('party'), { badge: anyEvo });
+  btn(102, 280, 66, 32, 'Gear', () => { tab = save.cls || save.party[0]; goto('gear'); });
+  btn(174, 280, 66, 32, 'Skills', () => { tab = save.cls || save.party[0]; goto('skills'); }, { badge: anySp });
+  btn(246, 280, 66, 32, 'Menu', () => { confirmNew = 0; goto('title'); });
 }
 // ---------- gear ----------
 function equip(it) {
@@ -397,4 +393,39 @@ function drawMsg() {
   m.lines.forEach((l, i) => T(l, 160, 168 + i * 13, COL.white, 1, 'c'));
   if (Math.floor(gtime * 2) % 2 === 0) T(TOUCH ? 'tap to continue' : 'J to continue', 160, 296, COL.dim, 1, 'c');
   hit(0, 0, LW, LH, nextMsg);
+}
+
+// ---------- class select: one hero per save ----------
+const CLASSPICK = [
+  { id: 'archer', tag: ['Draw, hold, loose.', 'Release on the ring.'] },
+  { id: 'warrior', tag: ['Steel and nerve.', 'Strike on the gold.'] },
+  { id: 'mage', tag: ['Trace the runes.', 'Hit each glowing one.'] },
+];
+let selHover = 'warrior';
+const _demoC = {};
+function demoChar(id) { if (!_demoC[id]) { const c = newChar(id, 1); const w = makeItem(1, 'weapon', id); w.rar = 0; w.lk = 0; c.gear.weapon = w; _demoC[id] = c; } return _demoC[id]; }
+function drawMechDemo(id, cx, cy, t) {
+  if (id === 'warrior') { rect(cx - 36, cy - 4, 72, 8, '#09080c'); frame(cx - 37, cy - 5, 74, 10, '#ffd35a'); rect(cx + 2, cy - 3, 14, 6, '#2f6a3a'); rect(cx + 7, cy - 3, 4, 6, COL.gold); const m = (Math.sin(t * 3) + 1) / 2; const x = Math.round(cx - 35 + m * 69); rect(x, cy - 8, 2, 2, '#ffd35a'); rect(x - 2, cy - 6, 6, 1, '#ffd35a'); rect(x, cy - 5, 2, 12, '#ffffff'); }
+  else if (id === 'archer') { for (let k = 0; k <= 30; k++) { const u = k / 30; rect(Math.round(cx - 32 + u * 64), Math.round(cy + 4 - Math.sin(u * 2.7 + .2) * 8), 1, 1, '#2a3a24'); }
+    const u = (t * .6) % 1.2, uu = Math.min(1, u), ax = Math.round(cx - 32 + uu * 64), ay = Math.round(cy + 4 - Math.sin(uu * 2.7 + .2) * 8); ringPx(cx + 20, Math.round(cy + 4 - Math.sin(.81 * 2.7 + .2) * 8), 4, '#7ee07e'); rect(ax - 5, ay, 6, 1, '#a0743a'); rect(ax + 1, ay - 1, 2, 3, '#d8dce8'); rect(ax - 6, ay - 1, 2, 1, '#5ac85a');
+    for (let k = -8; k <= 8; k++) rect(cx - 38 + Math.round(k * k / 20), cy + k, 1, 1, '#b07a3a'); }
+  else { ringPx(cx, cy, 10, '#8a5ad8'); ringPx(cx, cy, 6, '#2e2244'); const a = t * 2.4; rect(Math.round(cx + Math.cos(a) * 10) - 1, Math.round(cy + Math.sin(a) * 10) - 1, 3, 3, '#d6a6ff'); for (const r of [.5, 2.6, 4.4]) rect(Math.round(cx + Math.cos(r) * 14) - 1, Math.round(cy + Math.sin(r) * 14) - 1, 3, 3, Math.floor(t * 3) % 2 ? '#ffffff' : '#b48cff'); }
+}
+function drawSelect() {
+  drawArena(); bigTitle();
+  T('Choose your hero', 160, 30, COL.white, 1, 'c'); T('one hero per save, locked once chosen', 160, 42, COL.dark, 1, 'c');
+  CLASSPICK.forEach((P, i) => {
+    const x = 8 + i * 102, y = 58, w = 100, h = 214, sel = selHover === P.id, col = TINT[P.id];
+    panel(x, y, w, h, sel ? col : '#2a2a32');
+    const bob = RM ? 0 : Math.floor(gtime * 2.5 + i) % 2;
+    rect(x + 30, y + 92, 40, 3, '#16161c');
+    drawChar(demoChar(P.id), x + 50 - 27, y + 36 - bob, 3, '', { seed: i });
+    T(CLS[P.id].n, x + 50, y + 104, col, 1, 'c');
+    drawMechDemo(P.id, x + 50, y + 136, RM ? 1 : gtime + i);
+    T(P.id === 'archer' ? 'bow draw' : P.id === 'mage' ? 'rune circle' : 'sword bar', x + 50, y + 156, COL.dim, 1, 'c');
+    wrap(P.tag.join(' '), 92).slice(0, 4).forEach((l, k) => T(l, x + 50, y + 170 + k * 11, COL.white, 1, 'c'));
+    hit(x, y, w, h, () => { if (selHover === P.id) { chooseClass(P.id); SFX.lvl(); goto('camp'); } else { selHover = P.id; SFX.click(); } });
+  });
+  btn(8, 280, 92, 32, 'Back', () => goto('title'));
+  btn(108, 280, 204, 32, 'Play as ' + CLS[selHover].n, () => { chooseClass(selHover); SFX.lvl(); goto('camp'); }, { col: TINT[selHover], border: TINT[selHover] });
 }

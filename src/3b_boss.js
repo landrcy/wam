@@ -288,9 +288,9 @@ function bossBits(cv, x0, y0, n, sp, life) {
   const g = cv.getContext('2d'), d = g.getImageData(0, 0, cv.width, cv.height).data, pts = [];
   for (let y = 0; y < cv.height; y += 2) for (let x = 0; x < cv.width; x += 2) { const i = (y * cv.width + x) * 4; if (d[i + 3] > 200) pts.push([x, y, '#' + [d[i], d[i + 1], d[i + 2]].map(v => v.toString(16).padStart(2, '0')).join('')]); }
   for (let k = 0; k < n && pts.length; k++) {
-    const [x, y, col] = pts[Math.floor(Math.random() * pts.length)], px = x0 + x * PSC, py = y0 + y * PSC, cx = x0 + cv.width * PSC / 2, cy = y0 + cv.height * PSC * .6;
+    const [x, y, col] = pts[Math.floor(Math.random() * pts.length)], S = (B.boss && B.boss.f.sc) || PSC, px = x0 + x * S, py = y0 + y * S, cx = x0 + cv.width * S / 2, cy = y0 + cv.height * S * .6;
     const an = Math.atan2(py - cy, px - cx) + rnd(-.4, .4), v = rnd(.3, 1) * sp;
-    B.parts.push({ x: px, y: py, vx: Math.cos(an) * v, vy: Math.sin(an) * v - 40, t: 0, life: rnd(.5, 1) * life, col, s: PSC, g: 220 });
+    B.parts.push({ x: px, y: py, vx: Math.cos(an) * v, vy: Math.sin(an) * v - 40, t: 0, life: rnd(.5, 1) * life, col, s: S, g: 220 });
   }
 }
 function bossPose(f) {
@@ -318,8 +318,28 @@ function bossKilled(f) {
 }
 function bossShatter(f) {
   const bo = B.boss; if (!bo) return;
-  const cv = bossFrame(bo.k, bo.phase, bossPose(f)), x0 = f.x - BW * PSC / 2 - PSC, y0 = f.y - BH * PSC - PSC;
+  const cv = bossFrame(bo.k, bo.phase, bossPose(f)), x0 = f.x - BW * f.sc / 2 - f.sc, y0 = f.y - BH * f.sc - f.sc;
   bossBits(cv, x0, y0, 260, 260, 1.6);
+}
+// where the boss fights from once it has broken out: beside the box on wide screens, looming above it on tall ones
+function bossOutPos(bo) {
+  const side = bo.side || 1;
+  if (OX >= 150) { const sc = clamp(Math.floor((OX + 30) / BW), 2, 4); return { x: side > 0 ? LW + Math.min(OX * .5, BW * sc * .42) : -Math.min(OX * .5, BW * sc * .42), y: LH * .78, sc, where: 'side' }; }
+  if (OY >= 40) { const sc = clamp(Math.floor((OY + 100) / BH), 2, 4); return { x: 160 + side * 40, y: clamp(BH * sc - OY + 2, -6, 96), sc, where: 'top' }; } // looms over the top of the box
+  return { x: BOSS_POS[0], y: BOSS_POS[1], sc: PSC, where: 'in' };
+}
+function bossMove(bo, dur) { const f = bo.f; bo.mv = { t: 0, dur, x0: f.x, y0: f.y, s0: f.sc, to: bossOutPos(bo), broke: false }; }
+function updateBossMove(bo, dt) {
+  const f = bo.f, m = bo.mv; if (!m) { if (bo.outside) { const o = bossOutPos(bo); f.x = o.x; f.y = o.y; f.sc = o.sc; } return; }
+  m.t += dt; const k = clamp(m.t / m.dur, 0, 1), e = ease(k), to = m.to;
+  f.x = m.x0 + (to.x - m.x0) * e; f.y = m.y0 + (to.y - m.y0) * e - Math.sin(k * Math.PI) * (RM ? 10 : 70);
+  f.sc = k < .5 ? m.s0 : to.sc;
+  if (k > .45 && !m.broke && !bo.outside && to.where !== 'in') { // crashing through the frame
+    m.broke = true; bo.integ = Math.min(bo.integ, .3); borderShards(true); addCracks(10, B.t); quake(12); bossFlash('#ffffff', .3); SFX.shatter();
+    const ex = to.where === 'side' ? (to.x > 160 ? LW : 0) : clamp(to.x, 10, LW - 10), ey = to.where === 'side' ? LH * .55 : 0;
+    for (let i = 0; i < 40; i++) B.parts.push({ x: ex, y: ey + rnd(-30, 30), vx: rnd(-160, 160), vy: rnd(-160, 60), t: 0, life: rnd(.4, 1), col: i % 2 ? bo.D.crack : '#d8b04a', s: i % 3 ? 2 : 3, g: 180 });
+  }
+  if (k >= 1) { bo.mv = null; bo.outside = to.where !== 'in'; quake(8); SFX.land(); }
 }
 const expFor = (bo, ph) => bo.D.phases < 2 ? 70 : 26 + 98 * ph / (bo.D.phases - 1);
 function updateBoss(dt) {
@@ -337,24 +357,26 @@ function updateBoss(dt) {
       ev.land = 1; f.drop = 0; quake(9); SFX.land(); banner(FOES[f.k].n, bo.D.crack, 1.4);
       for (let i = 0; i < 30; i++) B.parts.push({ x: f.x + rnd(-90, 90), y: f.y, vx: rnd(-110, 110), vy: rnd(-110, -20), t: 0, life: rnd(.3, .8), col: i % 3 ? pick(ACTPAL[B.act].dust) : bo.D.crack, s: i % 2 ? 2 : 4, g: 260 });
     }
-    if (t > 2.5) { bo.st = 'fight'; B.state = 'fight'; }
+    if (t > 2.3 && !ev.leap) { ev.leap = 1; bo.side = 1; bossMove(bo, RM ? .5 : 1.1); SFX.roar(); }
+    if (ev.leap && !bo.mv && t > 2.6) { bo.st = 'fight'; B.state = 'fight'; }
   } else if (bo.st === 'phase') {
     if (!RM && t < .45 && Math.random() < .6) { const [cx, cy] = foeCenter(f); spark(cx + rnd(-60, 60), cy + rnd(-60, 60), bo.D.crack, 120); }
     if (t > .45 && !ev.morph) {
       ev.morph = 1; SFX.morph(); bossFlash('#ffffff', .25); bo.inv = !!BOSS[bo.k].pats[bo.phase].invert; quake(9);
-      const x0 = f.x - BW * PSC / 2 - PSC, y0 = f.y - BH * PSC - PSC;
+      const x0 = f.x - BW * f.sc / 2 - f.sc, y0 = f.y - BH * f.sc - f.sc;
       if (bo.old) bossBits(bo.old, x0, y0, bo.tr === 'burst' ? 170 : 90, bo.tr === 'burst' ? 300 : 160, 1.2);
-      bo.expT = expFor(bo, bo.phase);
+      bo.expT = expFor(bo, bo.phase); if (bo.outside) { bo.side = -(bo.side || 1); bossMove(bo, RM ? .4 : .8); }
       for (let i = 0; i < 26; i++) spark(...foeCenter(f), i % 2 ? bo.D.crack : '#ffffff', 260);
       if (bo.tr === 'reasm') bo.reasm = mkReasm(bossFrame(bo.k, bo.phase, bossPose(f)));
     }
-    if (t > 1.3) { bo.st = 'fight'; f.inv = false; f.timer = f.per * .8; bo.old = null; bo.reasm = null; }
+    if (t > 1.3 && !bo.mv) { bo.st = 'fight'; f.inv = false; f.timer = f.per * .8; bo.old = null; bo.reasm = null; }
   } else if (bo.st === 'outro') {
     if (t > .5 && !ev.back) { ev.back = 1; borderShards(false); SFX.rumble(); }
     if (t > .5) bo.integ = .3 + .7 * clamp((t - .5) / .85, 0, 1);
     if (t > 1.4 && !ev.ref) { ev.ref = 1; bo.integ = 1; bossFlash('#ffffff', .3); SFX.reform(); }
     if (t > 1.9) bo.st = 'done';
   }
+  updateBossMove(bo, dt);
   if (bo.st === 'fight' && !f.dead) {
     const pat = bossPat() || {};
     if (pat.drift && B.state === 'fight') B.zc = clamp(B.zBase + Math.sin(B.t * 1.6) * pat.drift, .12, .88);
@@ -370,13 +392,18 @@ function mkReasm(cv) { // pixel list with scattered start positions: the new for
 }
 // ---------- boss attacks: a unique move per boss and phase ----------
 function bossAttackFx(f, targets, slam) {
-  const bo = B.boss, ph = bo.phase, fx = f.x - 70, gy = 246;
+  const bo = B.boss, ph = bo.phase, out = bo.outside, [bcx, bcy] = foeCenter(f), fx = out ? 250 : f.x - 70, gy = 246;
   const add = e => B.fx.push(Object.assign({ t: 0 }, e));
+  if (out) { // an arm / tendril smashes in through the cracked frame, then the attack lands
+    const ex = bcx > LW ? LW : bcx < 0 ? 0 : clamp(bcx, 20, LW - 20), ey = bcx > LW || bcx < 0 ? clamp(bcy, 60, 240) : 0;
+    targets.forEach(u => add({ type: 'reach', x0: bcx, y0: bcy, ex, ey, x: u.x + 14, y: u.y - 22, dur: .42, col: bo.D.crack }));
+    addCracks(2, B.t);
+  }
   const tx = targets.map(u => [u.x, u.y]);
   SFX.whoosh();
   if (bo.k === 'gobchief') {
     add({ type: 'shock', x: fx, y: gy, dur: .45, col: ph ? '#ff7a1a' : '#8a7a5a', to: 20 });
-    if (ph) tx.forEach(([x, y], i) => add({ type: 'rock', x0: fx, y0: 120, x, y: y - 10, dur: .16 + i * .03, col: '#ff7a1a' }));
+    if (ph) tx.forEach(([x, y], i) => add({ type: 'rock', x0: out ? bcx : fx, y0: out ? bcy : 120, x, y: y - 10, dur: .16 + i * .03, col: '#ff7a1a' }));
   } else if (bo.k === 'treant') {
     if (ph === 0) add({ type: 'shock', x: fx, y: gy, dur: .45, col: '#62a038', to: 20 });
     else tx.forEach(([x, y]) => add({ type: 'roots', x, y, dur: .55, fire: ph >= 2 }));
@@ -385,7 +412,7 @@ function bossAttackFx(f, targets, slam) {
     add({ type: 'arc', x: 90, y: 200, dur: .32, col: ph >= 2 ? '#8a2ad0' : ph ? '#ff4a5a' : '#e4ecf6', r: 90 });
     if (ph >= 2) add({ type: 'wave', x: fx, y: gy, dur: .5, col: '#8a2ad0' });
   } else {
-    tx.forEach(([x, y], i) => { for (let k = 0; k < (ph >= 3 ? 4 : 2); k++) add({ type: 'shard', x0: f.x - 40 + rnd(-20, 20), y0: 120 + rnd(-40, 40), x: x + rnd(-6, 6), y: y - 20 + rnd(-8, 8), dur: .16 + k * .02, col: ph ? '#e0b0ff' : '#86ccec' }); });
+    tx.forEach(([x, y], i) => { for (let k = 0; k < (ph >= 3 ? 4 : 2); k++) add({ type: 'shard', x0: (out ? bcx : f.x - 40) + rnd(-20, 20), y0: (out ? bcy : 120) + rnd(-40, 40), x: x + rnd(-6, 6), y: y - 20 + rnd(-8, 8), dur: .16 + k * .02, col: ph ? '#e0b0ff' : '#86ccec' }); });
     if (ph >= 2) add({ type: 'arc', x: 90, y: 200, dur: .3, col: '#e8e0ff', r: 80, flip: 1 });
   }
 }
@@ -415,6 +442,16 @@ function drawBossFx(e) {
     ctx.globalAlpha = a;
     for (let k = 0; k < 10; k++) { const h = 10 + ((k * 7 + Math.floor(B.t * 20)) % 5) * 4; rect(x + k * 5, e.y - h, 4, h, k % 2 ? e.col : '#3c0e52'); rect(x + k * 5 + 1, e.y - h, 2, 2, '#e6a8ff'); }
     ctx.globalAlpha = 1;
+  } else if (e.type === 'reach') { // segmented arm from the boss outside, through the frame breach, to the target
+    const k = p < .45 ? ease(p / .45) : p < .7 ? 1 : 1 - ease((p - .7) / .3), pts = [[e.x0, e.y0], [e.ex, e.ey], [e.x, e.y]];
+    const L1 = Math.hypot(e.ex - e.x0, e.ey - e.y0), L2 = Math.hypot(e.x - e.ex, e.y - e.ey), reach = (L1 + L2) * k;
+    for (let d = 0; d < reach; d += 3) {
+      const [a, b, q] = d < L1 ? [pts[0], pts[1], d / L1] : [pts[1], pts[2], (d - L1) / L2];
+      const x = a[0] + (b[0] - a[0]) * q, y = a[1] + (b[1] - a[1]) * q, w = d < L1 ? 7 : 5;
+      rect(x - w / 2, y - w / 2, w, w, '#1a1420'); rect(x - w / 2 + 1, y - w / 2 + 1, w - 3, w - 3, (d / 3) % 4 < 2 ? e.col : darken(e.col, .35));
+    }
+    if (k > .1) { rect(e.ex - 5, e.ey - 5, 10, 10, '#ffffff'); ctx.globalAlpha = .5; rect(e.ex - 9, e.ey - 9, 18, 18, e.col); ctx.globalAlpha = 1; }
+    if (p > .4 && p < .6) { rect(e.x - 8, e.y - 1, 16, 2, '#ffffff'); rect(e.x - 1, e.y - 8, 2, 16, '#ffffff'); }
   } else if (e.type === 'shard') {
     const k = Math.min(1, p * 2.4), x = e.x0 + (e.x - e.x0) * k, y = e.y0 + (e.y - e.y0) * k;
     if (k < 1) { rect(x - 3, y - 1, 6, 2, e.col); rect(x - 1, y - 3, 2, 6, e.col); rect(x - 1, y - 1, 2, 2, '#ffffff'); rect(x + 4, y, 6, 1, darken(e.col, .3)); }
@@ -423,7 +460,7 @@ function drawBossFx(e) {
 }
 // draw the boss body: transforms, flicker, reassembly, orbiting shards, glitch rows
 function drawBossBody(f, x, y) {
-  const bo = B.boss, pose = bossPose(f), sc = PSC, X = x - sc, Y = y - sc;
+  const bo = B.boss, pose = bossPose(f), sc = f.sc || PSC, X = x - sc, Y = y - sc;
   let cv = bossFrame(bo.k, bo.phase, pose); f._cv = cv;
   const W = cv.width * sc, H = cv.height * sc, flash = f.flash > 0;
   // aura behind (rage / spirit) from phase 1 on
