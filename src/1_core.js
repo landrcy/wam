@@ -32,10 +32,10 @@ const TUNE = {
   missMult: 0,            // damage multiplier for a miss
   autoCdMul: 1.7,         // allies auto-attack this much slower than their cooldown
   autoDmgMul: 0.6,        // allies' auto attack damage
-  foeHp: 24, foeHpGrow: 1.44,
-  foeDmg: 6.2, foeDmgGrow: 1.37,
-  foeRate: 0.78,          // foe attack period multiplier (lower = more often)
-  bossHp: 1.35,           // extra boss life
+  foeHp: 40, foeHpGrow: 1.6,
+  foeDmg: 12, foeDmgGrow: 1.5,
+  foeRate: 0.64,          // foe attack period multiplier (lower = more often)
+  bossHp: 1.8,            // extra boss life
   missLock: 0.25,         // extra cooldown after a miss
   chainStep: 0.05, chainMax: 0.5, // perfect-chain damage bonus per perfect in a row
   dropChance: 0.4,

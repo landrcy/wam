@@ -226,6 +226,7 @@ function killFoe(f) {
     const [dx0, dy0] = foeCenter(f);
     if (save.autoScrap && isWorse(it)) { it.scrapped = true; save.scrap += it.rar + 1; setTimeout(() => B && num(dx0, dy0 - 30, 'scrapped +' + (it.rar + 1), COL.dim), 500); }
     else if (save.inv.length >= TUNE.invMax) { it.scrapped = true; save.scrap += it.rar + 1; num(dx0, f.y - 40, 'bag full +' + (it.rar + 1), COL.dim); }
+    else if (save.autoScrap && isWorse(it)) { it.scrapped = true; save.scrap += it.rar + 1; num(dx0, f.y - 40, 'scrapped +' + (it.rar + 1), COL.dim); }
     else save.inv.push(it);
     B.loot.push(it); B.fx.push({ type: 'drop', it, x: foeCenter(f)[0], y: foeCenter(f)[1], t: 0, dur: 1.2 });
     setTimeout(SFX.drop, 120);

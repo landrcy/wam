@@ -32,10 +32,10 @@ const TUNE = {
   missMult: 0,            // damage multiplier for a miss
   autoCdMul: 1.7,         // allies auto-attack this much slower than their cooldown
   autoDmgMul: 0.6,        // allies' auto attack damage
-  foeHp: 24, foeHpGrow: 1.44,
-  foeDmg: 6.2, foeDmgGrow: 1.37,
-  foeRate: 0.78,          // foe attack period multiplier (lower = more often)
-  bossHp: 1.35,           // extra boss life
+  foeHp: 40, foeHpGrow: 1.6,
+  foeDmg: 12, foeDmgGrow: 1.5,
+  foeRate: 0.64,          // foe attack period multiplier (lower = more often)
+  bossHp: 1.8,            // extra boss life
   missLock: 0.25,         // extra cooldown after a miss
   chainStep: 0.05, chainMax: 0.5, // perfect-chain damage bonus per perfect in a row
   dropChance: 0.4,
@@ -1516,6 +1516,7 @@ function killFoe(f) {
     const [dx0, dy0] = foeCenter(f);
     if (save.autoScrap && isWorse(it)) { it.scrapped = true; save.scrap += it.rar + 1; setTimeout(() => B && num(dx0, dy0 - 30, 'scrapped +' + (it.rar + 1), COL.dim), 500); }
     else if (save.inv.length >= TUNE.invMax) { it.scrapped = true; save.scrap += it.rar + 1; num(dx0, f.y - 40, 'bag full +' + (it.rar + 1), COL.dim); }
+    else if (save.autoScrap && isWorse(it)) { it.scrapped = true; save.scrap += it.rar + 1; num(dx0, f.y - 40, 'scrapped +' + (it.rar + 1), COL.dim); }
     else save.inv.push(it);
     B.loot.push(it); B.fx.push({ type: 'drop', it, x: foeCenter(f)[0], y: foeCenter(f)[1], t: 0, dur: 1.2 });
     setTimeout(SFX.drop, 120);
@@ -2420,16 +2421,28 @@ function drawTitle() {
   T('test build', 312, 306, '#2e2e38', 1, 'r');
 }
 // ---------- camp ----------
+// big floating title: above the arena box when the screen has room, otherwise across its top
+function bigTitle() {
+  const TL = 'W.A.M.', room = OY - 6; let sc = Math.min(7, Math.floor(room / 9)); while (sc > 2 && [...TL].reduce((w, ch) => w + textW(ch, sc) + sc, 0) > VW - 16) sc--; const out = sc >= 3, S = out ? sc : 3;
+  const tw = [...TL].map(ch => textW(ch, S) + S); let tx = Math.round(160 - tw.reduce((a, b) => a + b) / 2);
+  const by = out ? Math.round(-OY / 2 - S * 4) : 4, amp = RM ? 0 : (out ? S : 2);
+  for (let i = 0; i < TL.length; i++) {
+    const dy = Math.round(Math.sin(gtime * 2.2 + i * .8) * amp);
+    if (out && !RM && i % 2 === 0) { ctx.globalAlpha = .25 + .15 * Math.sin(gtime * 3 + i); rect(tx - S, by + dy + S * 8, tw[i] - S, S, COL.gold); ctx.globalAlpha = 1; }
+    T(TL[i], tx, by + dy, i % 2 ? COL.gold : '#ffffff', S, 'l', '#2a2238'); tx += tw[i];
+  }
+  if (out && !RM) for (let k = 0; k < 6; k++) { const t = (gtime * .6 + k / 6) % 1; ctx.globalAlpha = 1 - t; rect(Math.round(100 + k * 23 + Math.sin(k * 9 + gtime) * 6), Math.round(by + S * 9 - t * S * 10), 1, 1, COL.gold); } ctx.globalAlpha = 1;
+}
 function drawCamp() {
   if (act4Ready() && !save.act4) { save.act4 = true; persist(); msgQueue.push({ title: 'A void opens', spr: 'shade', col: '#b480ff', lines: ['Your ' + TUNE.act4Perfects + ' perfect strikes tore the sky.', 'Secret Act IV: The Void is open.'] }); scene = 'msg'; return; }
   const sa = Math.floor(save.sel / 3);
   drawArena(ACTS[sa].c);
-  T('W.A.M.', 8, 6, '#ffffff', 2, 'l', '#24242c');
-  T('Perfect ' + save.perfects, 312, 6, COL.gold, 1, 'r');
-  btn(250, 20, 62, 16, save.mute ? 'Sound off' : 'Sound on', () => { save.mute = !save.mute; persist(); SFX.click(); }, { col: COL.dim });
+  bigTitle();
+  T('Perfect', 8, 6, COL.gold); T('' + save.perfects, 8, 18, COL.gold);
+  btn(250, 6, 62, 16, save.mute ? 'Sound off' : 'Sound on', () => { save.mute = !save.mute; persist(); SFX.click(); }, { col: COL.dim });
   const showAct4 = save.cleared[8] || save.act4;
   for (let a = 0; a < (showAct4 ? 4 : 3); a++) {
-    const y = 42 + a * 26, A = ACTS[a], open = a < 3 || save.act4;
+    const y = 38 + a * 25, A = ACTS[a], open = a < 3 || save.act4;
     T(A.roman, 10, y + 5, open ? A.c : COL.dark);
     T(a === 3 && !save.act4 ? '? ? ?' : A.n, 34, y + 5, levelOpen(a * 3) ? COL.white : COL.dark);
     for (let l = 0; l < 3; l++) {
@@ -2442,24 +2455,23 @@ function drawCamp() {
     if (a === 3 && !save.act4) T('perfect hits ' + Math.min(save.perfects, TUNE.act4Perfects) + '/' + TUNE.act4Perfects, 34, y + 16, '#5a4a7a');
   }
   // selected level
-  const L = LEVELS[save.sel], py = showAct4 ? 150 : 128;
-  panel(8, py, 304, 56, ACTS[sa].c + '66');
+  const L = LEVELS[save.sel], py = 40 + (showAct4 ? 4 : 3) * 25;
+  panel(8, py, 304, 50, ACTS[sa].c + '66');
   T(ACTS[sa].roman + '-' + (save.sel % 3 + 1) + '  ' + L.n, 16, py + 6, ACTS[sa].c);
   T(save.cleared[save.sel] ? 'cleared' : 'new', 304, py + 6, save.cleared[save.sel] ? COL.green : COL.gold, 1, 'r');
   const names = [...new Set(L.w.flat())].map(k => FOES[k].n);
   T('Foes: ' + names.join(', '), 16, py + 21, COL.dim);
-  T('Foe level ' + (save.sel + 1) + '   3 waves' + (save.sel % 3 === 2 ? ' + boss' : ''), 16, py + 36, COL.dim);
+  T('Foe level ' + (save.sel + 1) + '   3 waves' + (save.sel % 3 === 2 ? ' + boss' : ''), 16, py + 34, COL.dim);
   // party
-  const qy = showAct4 ? 214 : 196;
+  const qy = py + 54;
   ORDER.forEach((id, i) => {
-    const x = 10 + i * 104, c = save.chars[id], got = save.party.includes(id);
-    const bob = got ? Math.floor(gtime * 2 + i) % 2 : 0;
-    if (c && got) drawChar(c, x, qy + 4 - bob, 3, '', { seed: i }); else drawSpr(CLS[id].spr, x, qy + 4 - bob, 3, 'dim');
+    const x = 8 + i * 102, c = save.chars[id], got = save.party.includes(id), cx = x + 50;
+    panel(x, qy, 100, 222 + 52 - qy, id === save.active && got ? '#5a5a6a' : '#2a2a32');
+    const bob = got && !RM ? Math.floor(gtime * 2 + i) % 2 : 0;
+    if (c && got) drawChar(c, cx - 18, qy + 4 - bob, 2, '', { seed: i }); else drawSpr(CLS[id].spr, cx - 18, qy + 4 - bob, 2, 'dim');
     if (got) {
-      T(charName(c), x + 40, qy + 6, id === save.active ? COL.white : COL.dim);
-      T('Lv ' + c.lvl, x + 40, qy + 20, COL.dim);
-      if (canEvolve(c) && Math.floor(gtime * 3) % 2) T('evolve!', x + 40, qy + 32, COL.gold);
-      if (id === save.active) rect(x + 16, qy - 2, 4, 2, COL.white);
+      T(charName(c), cx, qy + 42, id === save.active ? COL.white : COL.dim, 1, 'c');
+      T(canEvolve(c) && Math.floor(gtime * 3) % 2 ? 'evolve!' : 'Lv ' + c.lvl, cx, qy + 54, canEvolve(c) ? COL.gold : COL.dim, 1, 'c');
     }
   });
   const anySp = save.party.some(id => canEvolve(save.chars[id]) || newlyLit(save.chars[id]).length > 0);
@@ -2476,10 +2488,11 @@ function equip(it) {
   save.inv = save.inv.filter(x => x !== it); if (old) save.inv.push(old);
   selItem = { it, eq: true }; SFX.drop(); persist();
 }
-function scrapItem(it) { save.inv = save.inv.filter(x => x !== it); save.scrap += it.rar + 1; selItem = null; SFX.kill(); persist(); }
+function scrapItem(it) { if (it.lock) return; save.inv = save.inv.filter(x => x !== it); save.scrap += it.rar + 1; selItem = null; SFX.kill(); persist(); }
+function isWorse(it) { const users = save.party.filter(id => canUse(it, id)); return !it.lock && !users.some(id => itemScore(it) > itemScore(save.chars[id].gear[it.slot])); }
 function scrapWorse() {
   let n = 0;
-  save.inv = save.inv.filter(it => {
+  save.inv = save.inv.filter(it => { if (it.lock) return true;
     const users = save.party.filter(id => canUse(it, id));
     const better = users.some(id => itemScore(it) > itemScore(save.chars[id].gear[it.slot]));
     if (!better) { save.scrap += it.rar + 1; n++; return false; } return true;
@@ -2501,50 +2514,56 @@ function drawItemCell(it, x, y, s, dim, sel) {
 function drawGear() {
   drawArena(); tabs(); T('Gear', 8, 7, COL.white, 1);
   const c = save.chars[tab], s = calcStats(c);
+  // paper-doll preview: the character as it looks with this gear
+  panel(8, 28, 76, 112, '#2a2a32');
+  const pv = selItem && !selItem.eq && canUse(selItem.it, tab) ? Object.assign({}, c, { gear: Object.assign({}, c.gear, { [selItem.it.slot]: selItem.it }) }) : c;
+  drawChar(pv, 14, 40 - (RM ? 0 : Math.floor(gtime * 2) % 2), 4, '', { seed: 1 });
+  T(charName(c), 46, 110, COL.white, 1, 'c'); T(pv === c ? 'Lv ' + c.lvl : 'preview', 46, 124, pv === c ? COL.dim : COL.gold, 1, 'c');
   SLOTS.forEach((sl, i) => {
-    const y = 28 + i * 28, it = c.gear[sl], sel = selItem && selItem.it === it && it;
-    panel(8, y, 150, 26, sel ? '#ffffff' : '#2a2a32');
-    if (it) {
-      drawGearArt(it, 20, y + 13, 2);
-      T(it.name, 34, y + 3, RAR[it.rar].c); T(modLines(it).slice(0, 2).join(' '), 34, y + 14, COL.dim);
-      hit(8, y, 150, 26, () => { selItem = { it, eq: true }; SFX.click(); });
-    } else T('no ' + (sl === 'weapon' ? CLS[tab].weapon : sl), 34, y + 8, COL.dark);
+    const x = 88 + (i % 2) * 38, y = 28 + Math.floor(i / 2) * 38, it = c.gear[sl], sel = selItem && selItem.it === it && it;
+    slotBox(x, y, 36, 36, sel ? '#ffffff' : it ? RAR[it.rar].c + 'cc' : '#2a2a32');
+    if (it) { drawGearArt(it, x + 18, y + 18, 2); hit(x, y, 36, 36, () => { selItem = { it, eq: true }; SFX.click(); }); }
+    else rect(x + 16, y + 16, 4, 4, '#2a2a32');
   });
-  T('DMG ' + Math.round(s.dmg) + '  LIFE ' + s.hp + '  ARM ' + s.arm, 8, 145, COL.white);
-  T('CRIT ' + s.crit + '%  ' + (1 / s.cd).toFixed(1) + ' hits/s  ZONE +' + s.zone + '%', 8, 158, COL.dim);
+  T('DMG ' + Math.round(s.dmg) + ' LIFE ' + s.hp + ' ARM ' + s.arm + ' CRIT ' + s.crit + '%', 8, 146, COL.white);
   // detail
-  panel(164, 28, 148, 110, '#2a2a32');
+  panel(166, 28, 146, 112, '#2a2a32');
   if (selItem) {
     const it = selItem.it, eq = c.gear[it.slot];
-    T(it.name, 170, 33, RAR[it.rar].c);
-    T(RAR[it.rar].n + '  Lv ' + it.ilvl, 170, 46, COL.dim);
-    let y = 59; modLines(it).forEach(l => { T(l, 170, y, COL.white); y += 11; });
+    wrap(it.name, 136).slice(0, 1).forEach(l => T(l, 171, 33, RAR[it.rar].c));
+    T(RAR[it.rar].n + ' Lv ' + it.ilvl, 171, 45, COL.dim);
+    let y = 57; modLines(it).slice(0, 3).forEach(l => { T(l, 171, y, COL.white); y += 11; });
+    if (it.u) { const L = itemLook(it); if (L && L.d) { T(wrap(L.d, 136)[0], 171, y, COL.gold); y += 11; } }
     if (!selItem.eq) {
-      if (!canUse(it, tab)) T(CLS[it.cls].n + ' only', 170, 106, COL.red);
-      else { const d = Math.round(itemScore(it) - itemScore(eq)); T(d >= 0 ? '+' + d + ' power' : d + ' power', 170, 106, d >= 0 ? COL.green : COL.red); }
-      btn(168, 116, 68, 18, 'Equip', () => equip(it), { dis: !canUse(it, tab) });
-      btn(240, 116, 68, 18, 'Scrap', () => scrapItem(it), { col: COL.red });
-    } else T('equipped', 170, 120, COL.green);
-  } else { T('Pick an item', 170, 34, COL.dim); wrap('Scrap gear you do not need to fill the Forge. A full Forge crafts a new item.', 136).forEach((l, i) => T(l, 170, 52 + i * 12, COL.dark)); }
+      if (!canUse(it, tab)) T(CLS[it.cls].n + ' only', 171, 102, COL.red);
+      else { const d = Math.round(itemScore(it) - itemScore(eq)); T(d >= 0 ? '+' + d + ' power' : d + ' power', 171, 102, d >= 0 ? COL.green : COL.red); }
+      btn(168, 116, 44, 20, 'Equip', () => equip(it), { dis: !canUse(it, tab) });
+      btn(214, 116, 52, 20, it.lock ? 'Unlock' : 'Lock', () => { it.lock = !it.lock; SFX.click(); persist(); }, { col: COL.gold });
+      btn(268, 116, 42, 20, 'Scrap', () => scrapItem(it), { col: COL.red, dis: !!it.lock });
+    } else T('equipped', 171, 120, COL.green);
+  } else { T('Pick an item', 171, 34, COL.dim); wrap('Equipped and locked items are never scrapped.', 134).forEach((l, i) => T(l, 171, 52 + i * 12, COL.dark)); }
   // bag
-  T('Bag ' + save.inv.length + '/' + TUNE.invMax, 8, 174, COL.white);
+  T('Bag ' + save.inv.length + '/' + TUNE.invMax, 8, 160, COL.white);
   save.inv.forEach((it, i) => {
-    const x = 8 + (i % 12) * 25, y = 188 + Math.floor(i / 12) * 25, sel = selItem && selItem.it === it;
+    const x = 8 + (i % 12) * 25, y = 172 + Math.floor(i / 12) * 25, sel = selItem && selItem.it === it;
     drawItemCell(it, x, y, 24, !canUse(it, tab), sel);
-    if (!canUse(it, tab) === false && itemScore(it) > itemScore(c.gear[it.slot])) rect(x + 19, y + 2, 3, 3, COL.green);
+    if (canUse(it, tab) && itemScore(it) > itemScore(c.gear[it.slot])) rect(x + 19, y + 2, 3, 3, COL.green);
+    if (it.lock) { rect(x + 2, y + 17, 5, 4, COL.gold); frame(x + 3, y + 14, 3, 4, COL.gold); }
     hit(x, y, 24, 24, () => { selItem = { it }; SFX.click(); });
   });
-  for (let i = save.inv.length; i < TUNE.invMax; i++) frame(8 + (i % 12) * 25, 188 + Math.floor(i / 12) * 25, 24, 24, '#18181e');
-  T('Forge ' + save.scrap + '/' + TUNE.forgeCost, 8, 248, COL.white);
-  bar(8, 261, 100, 3, save.scrap / TUNE.forgeCost, COL.gold);
-  btn(116, 244, 66, 20, 'Craft', claimForge, { dis: save.scrap < TUNE.forgeCost, col: COL.gold });
-  btn(188, 244, 124, 20, 'Scrap worse', scrapWorse, { dis: !save.inv.length, col: COL.dim });
+  for (let i = save.inv.length; i < TUNE.invMax; i++) frame(8 + (i % 12) * 25, 172 + Math.floor(i / 12) * 25, 24, 24, '#18181e');
+  T('Forge ' + save.scrap + '/' + TUNE.forgeCost, 8, 226, COL.white);
+  bar(8, 239, 150, 3, save.scrap / TUNE.forgeCost, COL.gold);
+  btn(232, 222, 80, 20, 'Craft', claimForge, { dis: save.scrap < TUNE.forgeCost, col: COL.gold });
+  btn(8, 250, 148, 22, 'Scrap all worse', scrapWorse, { dis: !save.inv.some(isWorse), col: COL.white });
+  btn(162, 250, 150, 22, 'Auto-scrap ' + (save.autoScrap ? 'on' : 'off'), () => { save.autoScrap = !save.autoScrap; persist(); SFX.click(); if (save.autoScrap) scrapWorse(); }, { col: save.autoScrap ? COL.green : COL.dim, sel: save.autoScrap });
+  T('never scraps equipped or locked', 312, 278, COL.dark, 1, 'r');
   backBtn();
 }
 // ---------- skills: a scrollable, zoomable rune constellation per character ----------
 const TV = {}; let treeSel = null, treeAnim = [], treeDrag = null;
 const ZOOMS = [.5, 1, 2];
-function tview(id) { if (!TV[id]) { const c = save.chars[id], T = buildTree(id), f = treeFocus(c); TV[id] = { x: f.x, y: f.y, zi: 1 }; } return TV[id]; }
+function tview(id) { if (!TV[id]) { const c = save.chars[id], T = buildTree(id), f = treeFocus(c); TV[id] = { x: 0, y: -60, zi: 1 }; } return TV[id]; }
 function treeFocus(c) { const T = buildTree(c.id); const p = T.N.find(n => nodeState(c, n) === 'pick') || [...T.N].reverse().find(n => nodeState(c, n) === 'own') || T.N[0]; return { x: p.x, y: p.y + 40 }; }
 const TREE_CLIP = [4, 24, 312, 196];
 function treeToScr(v, n) { const z = ZOOMS[v.zi]; return [Math.round(160 + (n.x - v.x) * z), Math.round(TREE_CLIP[1] + TREE_CLIP[3] / 2 + (n.y - v.y) * z)]; }
@@ -2561,7 +2580,7 @@ function drawSkills() {
   drawArena(); tabs(); T('Skills', 8, 7, COL.white);
   const c = save.chars[tab], Tr = buildTree(tab), v = tview(tab), z = ZOOMS[v.zi], [cx0, cy0, cw, ch] = TREE_CLIP;
   // unlock animations for nodes that lit up since you last looked
-  for (const n of newlyLit(c)) { c.seen.push(n.id); treeAnim.push({ id: n.id, t: 0 }); if (treeAnim.length === 1) SFX.lvl(); persist(); }
+  for (const n of newlyLit(c)) { c.seen.push(n.id); treeAnim.push({ id: n.id, t: -.8 * treeAnim.length }); if (treeAnim.length === 1) SFX.lvl(); persist(); }
   panel(cx0 - 2, cy0 - 2, cw + 4, ch + 4, '#3a3a44');
   ctx.save(); ctx.beginPath(); ctx.rect(cx0, cy0, cw, ch); ctx.clip();
   rect(cx0, cy0, cw, ch, '#07060c');
@@ -2621,7 +2640,7 @@ function drawSkills() {
   // unlock bursts
   treeAnim = treeAnim.filter(a => a.t < 1.2);
   for (const a of treeAnim) {
-    a.t += 1 / 60; const n = Tr.by[a.id]; if (!n) continue; const [x, y] = treeToScr(v, n), k = a.t / 1.2, col = KINDCOL[n.k];
+    a.t += 1 / 60; const n = Tr.by[a.id]; if (!n || a.t < 0) continue; const [x, y] = treeToScr(v, n), k = a.t / 1.2, col = KINDCOL[n.k];
     ctx.globalAlpha = 1 - k; const R = 6 + k * 26;
     for (let i = 0; i < 16; i++) { const an = i / 16 * Math.PI * 2; rect(Math.round(x + Math.cos(an) * R), Math.round(y + Math.sin(an) * R), 2, 2, i % 2 ? col : '#ffffff'); }
     if (k < .3) { ctx.globalAlpha = (.3 - k) * 2; rect(x - 12, y - 12, 24, 24, '#ffffff'); }
@@ -2631,7 +2650,7 @@ function drawSkills() {
   // drag to pan; wheel or buttons to zoom
   UI.unshift({ x: cx0, y: cy0, w: cw, h: ch, fn: () => {}, drag: true });
   btn(282, 196, 14, 14, '+', () => treeZoom(1), { dis: v.zi >= ZOOMS.length - 1 }); btn(298, 196, 14, 14, '-', () => treeZoom(-1), { dis: v.zi <= 0 });
-  btn(230, 196, 48, 14, 'center', () => { const f = treeFocus(c); v.x = f.x; v.y = f.y; SFX.click(); });
+  btn(230, 196, 48, 14, 'center', () => { v.x = 0; v.y = -60; SFX.click(); });
   // tooltip in the game font
   T(charName(c) + '  Lv ' + c.lvl, 8, 28, COL.white, 1, 'l', '#000');
   bar(8, 40, 90, 2, c.xp / xpNeed(c.lvl), COL.blue);
@@ -2648,9 +2667,9 @@ function drawSkills() {
       msgQueue.push({ title: E.n + '!', char: c, col: COL.gold, lines: ['The ' + CLS[c.id].n + ' evolved.', ...E.d] }); msgReturn = 'skills'; scene = 'msg';
     }, { col: COL.gold, border: COL.gold });
   } else {
-    T('Nodes light up as you level and beat bosses.', 12, 232, COL.dim);
-    T('At each fork you pick one path for good.', 12, 245, COL.dim);
-    T(TOUCH ? 'Drag to look around, tap a node.' : 'Drag or scroll to look, click a node.', 12, 258, COL.dark);
+    T('Nodes light up with levels and bosses.', 12, 232, COL.dim);
+    T('Each fork: pick one path for good.', 12, 245, COL.dim);
+    T(TOUCH ? 'Drag to look, tap a node.' : 'Drag or scroll, click a node.', 12, 258, COL.dark);
   }
   backBtn();
 }
