@@ -88,8 +88,8 @@ function drawUltFront(u, x, y) {
 // HUD meter: top-left under the level name; click to transform
 function drawUltHud() {
   const u = activeUnit(), U = ultOf(u); if (!U) return; const st = ultSt(), full = st.m >= 1 || ADM.ult;
-  const x = 8, y = 18, w = 82; rect(x, y, w, 11, '#0c0c10'); frame(x, y, w, 11, full ? U.c : '#3a3a44');
-  const fw = st.on ? Math.round((w - 4) * st.t / ULT_DUR) : Math.round((w - 4) * st.m); rect(x + 2, y + 2, fw, 7, st.on ? U.c2 : U.c); if (full && !st.on && !RM && Math.floor(B.t * 4) % 2) rect(x + 2, y + 2, w - 4, 1, '#ffffff');
-  T(st.on ? U.n.split(' ')[0] : full ? (TOUCH ? 'ULT ready' : 'K  ULT ready') : 'ultimate', x + w / 2, y + 2, full || st.on ? '#000' : COL.dim, 1, 'c');
-  hit(x, y, w, 11, ultGo);
+  const x = 8 + B.units.length * 38 + 4, y = 259, w = 86; rect(x, y, w, 15, '#0c0c10'); frame(x, y, w, 15, full ? U.c : '#3a3a44');
+  const fw = st.on ? Math.round((w - 4) * st.t / ULT_DUR) : Math.round((w - 4) * st.m); rect(x + 2, y + 2, fw, 11, st.on ? U.c2 : U.c); if (full && !st.on && !RM && Math.floor(B.t * 4) % 2) rect(x + 2, y + 2, w - 4, 1, '#ffffff');
+  T(st.on ? U.n.split(' ')[0] : full ? (TOUCH ? 'ULT ready' : 'K  ULT ready') : 'ultimate', x + w / 2, y + 3, full || st.on ? '#000' : COL.dim, 1, 'c');
+  hit(x, y, w, 15, ultGo);
 }
