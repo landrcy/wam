@@ -85,6 +85,7 @@ function T(s, x, y, col = COL.white, sc = 1, align = 'l', shadow = null) {
   s = String(s);
   if (align === 'c') x -= Math.floor(textW(s, sc) / 2); else if (align === 'r') x -= textW(s, sc);
   x = Math.round(x); y = Math.round(y);
+  if (window.WAMTRACE && !shadow) WAMTRACE.push({ k: 't', s, x, y, w: textW(s, sc), h: 9 * sc, sc });
   if (shadow) T(s, x + sc, y + sc, shadow, sc, 'l');
   for (const ch of s) {
     if (ch === ' ') { x += 4 * sc; continue; }
@@ -656,7 +657,7 @@ function newChar(id, lvl) {
 }
 function newSave() {
   save = { v: 1, unlocked: 0, cleared: Array(12).fill(false), sel: 0, perfects: 0, bestStreak: 0, kills: 0, party: ['warrior'], active: 'warrior',
-    chars: { warrior: newChar('warrior', 1) }, inv: [], scrap: 0, goblets: [], act4: false, mute: false, nextId: 1, bestLvl: 1, tut: false, started: false, autoScrap: false };
+    chars: { warrior: newChar('warrior', 1) }, inv: [], scrap: 0, goblets: [], act4: false, mute: false, nextId: 1, bestLvl: 1, tut: false, started: false, autoScrap: false, autoEquip: false };
   save.cls = null; giveStarter('warrior');
   return save;
 }
@@ -669,7 +670,7 @@ function chooseClass(id) {
   const m = save.mute; newSave(); save.mute = m; giveStarter(id); save.cls = id; save.started = true; persist();
 }
 function loadSave() {
-  try { const s = JSON.parse(localStorage.getItem(SAVE_KEY)); if (s && s.v === 1 && s.chars) { save = s; for (const id in s.chars) for (const sl of SLOTS) if (s.chars[id].gear[sl] === undefined) s.chars[id].gear[sl] = null; if (s.autoScrap === undefined) s.autoScrap = false;
+  try { const s = JSON.parse(localStorage.getItem(SAVE_KEY)); if (s && s.v === 1 && s.chars) { save = s; for (const id in s.chars) for (const sl of SLOTS) if (s.chars[id].gear[sl] === undefined) s.chars[id].gear[sl] = null; if (s.autoScrap === undefined) s.autoScrap = false; if (s.autoEquip === undefined) s.autoEquip = false;
       for (const id in s.chars) { const c = s.chars[id]; delete c.st; delete c.stp; delete c.sp; c.seen = c.seen || []; for (const sl of SLOTS) { const it = c.gear[sl]; if (it && !it.cls) it.cls = id; } }
       for (const it of s.inv) if (!it.cls) it.cls = pick(s.party);
       // solo migration: keep one hero (the warrior if present), scrap gear for the others
@@ -1386,7 +1387,7 @@ function bdTorch(x, y, t) {
   ctx.fillStyle = '#ff7020'; ctx.fillRect(x - 1, y - 1, 3, 2); ctx.fillStyle = '#ffd060'; ctx.fillRect(x, y - 1 - Math.round(f * 2), 1, 2 + Math.round(f));
 }
 function drawBackdrop() {
-  const act = scene === 'battle' && B ? B.act : scene === 'camp' && typeof save !== 'undefined' && save ? Math.floor((save.sel || 0) / 3) : -1;
+  const act = scene === 'battle' && B ? B.act : scene !== 'title' && typeof save !== 'undefined' && save && save.started ? Math.floor((save.sel || 0) / 3) : 0;
   if (act < 0 || act > 3) return false;
   if (!bdCache || bdCache.act !== act || bdCache.W !== VW || bdCache.H !== VH) bdCache = bdBuild(act, VW, VH);
   const { c, S } = bdCache, t = RM ? 0 : gtime, P = BDP[act];
@@ -1490,14 +1491,16 @@ function unitBar(u) { return u ? evoField(u.c, 'bar', null) : null; }
 const MECH = { warrior: 'sword', archer: 'bow', mage: 'rune' };
 const mechOf = u => u ? MECH[u.id] || 'sword' : 'sword';
 const circD = (a, b) => { const d = Math.abs(a - b) % 1; return Math.min(d, 1 - d); };
-function aimD() { const u = activeUnit(); return mechOf(u) === 'rune' ? circD(B.mk, B.zc) : Math.abs(B.mk - B.zc); }
+function aimD() { return Math.abs(B.mk - B.zc); }
 function newTarget() {
   const m = mechOf(activeUnit());
   if (m === 'bow') { B.zc = B.zBase = rnd(.45, .88); B.zc2 = B.zc > .66 ? B.zc - rnd(.2, .28) : Math.min(.96, B.zc + rnd(.16, .24)); B.drawing = false; B.tapMode = false; B.over = 0; B.mk = 0; B.md = 1; return; }
   if (m === 'rune') {
-    const n = Math.random() < .15 + .07 * B.act ? 3 : Math.random() < .35 ? 2 : 1; let a = B.mk + B.md * rnd(.15, .3); B.runes = [];
-    for (let i = 0; i < n; i++) { B.runes.push(((a % 1) + 1) % 1); a += B.md * rnd(.14, .2); }
-    B.runeQ = []; B.zc = B.zBase = B.runes[0]; return;
+    // mana vial: one or more fill lines, bottom to top; the liquid rises and must be stopped on each line in turn
+    const n = Math.random() < .12 + .06 * B.act ? 3 : Math.random() < .3 ? 2 : 1; B.runes = [];
+    let a = n === 1 ? rnd(.45, .85) : n === 2 ? rnd(.32, .5) : rnd(.26, .36);
+    for (let i = 0; i < n; i++) { B.runes.push(Math.min(.9, a)); a += rnd(.2, .26); }
+    B.runeQ = []; B.zc = B.zBase = B.runes[0]; B.mk = 0; B.md = 1; return;
   }
   B.zc = B.zBase = rnd(.18, .82); rerollBar();
 }
@@ -1711,7 +1714,8 @@ function killFoe(f) {
   if (f.T.boss || lastOne || Math.random() < TUNE.dropChance) {
     const it = makeItem(f.L + (Math.random() < .3 ? 1 : 0), null, pick(save.party), f.T.boss ? 1 : 0, f.T.boss ? .6 : .1 * B.act);
     const [dx0, dy0] = foeCenter(f);
-    if (save.autoScrap && isWorse(it)) { it.scrapped = true; save.scrap += it.rar + 1; setTimeout(() => B && num(dx0, dy0 - 30, 'scrapped +' + (it.rar + 1), COL.dim), 500); }
+    if (autoEquipDrop(it)) { it.equipped = true; setTimeout(() => { if (B) { num(dx0, dy0 - 30, 'equipped!', COL.gold); B.fx.push({ type: 'ring', x: B.units[0].x, y: B.units[0].y - 24, t: 0, dur: .45, col: COL.gold }); } }, 700); }
+    else if (save.autoScrap && isWorse(it)) { it.scrapped = true; save.scrap += it.rar + 1; setTimeout(() => B && num(dx0, dy0 - 30, 'scrapped +' + (it.rar + 1), COL.dim), 500); }
     else if (save.inv.length >= TUNE.invMax) { it.scrapped = true; save.scrap += it.rar + 1; num(dx0, f.y - 40, 'bag full +' + (it.rar + 1), COL.dim); }
     else if (save.autoScrap && isWorse(it)) { it.scrapped = true; save.scrap += it.rar + 1; num(dx0, f.y - 40, 'scrapped +' + (it.rar + 1), COL.dim); }
     else save.inv.push(it);
@@ -1861,7 +1865,13 @@ function updateBattle(dt) {
   if (mech === 'bow') {
     if (B.drawing) { B.mk += markerSpeed() * .8 * dt; if (B.mk >= 1.12) { B.mk = 1.12; B.over += dt; if (B.over > .45 && B.state === 'fight') { num(60, 270, 'overdrawn', '#ff6a6a'); bowRelease(); } } }
     else B.mk = Math.max(0, B.mk - dt * 4);
-  } else if (mech === 'rune') { B.mk = ((B.mk + B.md * markerSpeed() * .62 * dt) % 1 + 1) % 1; }
+  } else if (mech === 'rune') { // vial fills only when the hero is ready; later lines in a cast fill faster
+    if (B.cd <= 0) B.mk += B.md * markerSpeed() * .5 * (1 + .25 * B.runeQ.length) * dt;
+    if (B.mk < 0) { B.mk = 0; B.md = 1; }
+    B.spill = Math.max(0, (B.spill || 0) - dt);
+    if (B.state === 'fight' && B.cd <= 0 && B.mk > B.zc + zones().g / 2 + .06) { B.spill = .6; B.spillLv = B.mk; num(160, 244, 'spilled', '#ff6a6a'); strike(); newTarget(); }
+    if (B.mk > 1.05) B.mk = 0;
+  }
   else { B.mk += B.md * markerSpeed() * dt;
   if (B.mk > 1) { B.mk = 2 - B.mk; B.md = -1; } if (B.mk < 0) { B.mk = -B.mk; B.md = 1; } }
   if (B.state !== 'fight') return;
@@ -2586,6 +2596,7 @@ function slotBox(x, y, w, h, accent) { // inset stone slot
   if (accent) { frame(x, y, w, h, accent); rect(x, y, 1, 1, '#000'); rect(x + w - 1, y, 1, 1, '#000'); rect(x, y + h - 1, 1, 1, '#000'); rect(x + w - 1, y + h - 1, 1, 1, '#000'); rect(x + 1, y + 1, 1, 1, accent); rect(x + w - 2, y + 1, 1, 1, accent); }
 }
 function btn(x, y, w, h, label, fn, o = {}) {
+  if (window.WAMTRACE) WAMTRACE.push({ k: 'b', s: label, x, y, w, h });
   const hov = !o.dis && mouse.x >= x && mouse.x < x + w && mouse.y >= y && mouse.y < y + h;
   const edge = o.dis ? '#221e28' : o.sel ? GILD.l : hov ? '#9a8aa8' : (o.border || STONE.h);
   rect(x, y, w, h, o.fill || (hov ? '#221c2a' : '#141118'));
@@ -2628,6 +2639,7 @@ function drawArena(accent = GILD.m) {
   if (bo) drawBorderCracks();
 }
 function panel(x, y, w, h, col = '#3a3a44') {
+  if (window.WAMTRACE) WAMTRACE.push({ k: 'p', x, y, w, h });
   rect(x, y, w, h, COL.panel);
   const neutral = col === '#3a3a44' || col === '#2a2a32' || col === '#2a2a32';
   ornFrame(x, y, w, h, { trim: neutral ? '#6a5426' : col, L: h >= 40 && w >= 40 ? 6 : 3 });
@@ -2661,23 +2673,67 @@ function drawTitle() {
 }
 // ---------- camp ----------
 // big floating title: above the arena box when the screen has room, otherwise across its top
-function bigTitle() {
-  const TL = 'W.A.M.', room = OY - 6; let sc = Math.min(7, Math.floor(room / 9)); while (sc > 2 && [...TL].reduce((w, ch) => w + textW(ch, sc) + sc, 0) > VW - 16) sc--; const out = sc >= 3, S = out ? sc : 3;
-  const tw = [...TL].map(ch => textW(ch, S) + S); let tx = Math.round(160 - tw.reduce((a, b) => a + b) / 2);
-  const by = out ? Math.round(-OY / 2 - S * 4) : 4, amp = RM ? 0 : (out ? S : 2);
-  for (let i = 0; i < TL.length; i++) {
-    const dy = Math.round(Math.sin(gtime * 2.2 + i * .8) * amp);
-    if (out && !RM && i % 2 === 0) { ctx.globalAlpha = .25 + .15 * Math.sin(gtime * 3 + i); rect(tx - S, by + dy + S * 8, tw[i] - S, S, COL.gold); ctx.globalAlpha = 1; }
-    T(TL[i], tx, by + dy, i % 2 ? COL.gold : '#ffffff', S, 'l', '#2a2238'); tx += tw[i];
+// ---- floating logo: built once per scale into a buffer (bevel, dithered gold, stone outline, gem stops, sword underline) ----
+let logoBuf = null;
+function logoScale() { // biggest scale whose logo fits the band above the box; 0 = no room
+  const free = VH - LH;
+  for (let S = 4; S >= 2; S--) { const h = 11 * S + 16, w = logoW(S); if (free >= h + 8 && w <= VW - 12) return S; }
+  return 0;
+}
+function logoW(S) { return ['W', 'A', 'M'].reduce((w, ch) => w + glyphCanvas(ch, '#fff').width * S, 0) + 3 * (S * 3 + 4) + 8; }
+function logoH(S) { return 11 * S + 16; }
+function buildLogo(S) {
+  const W = logoW(S) + 8, H = logoH(S) + 4, c = document.createElement('canvas'); c.width = W; c.height = H;
+  const g = c.getContext('2d'), m = document.createElement('canvas'); m.width = W; m.height = H; const mg = m.getContext('2d');
+  let x = 6; const gems = [];
+  for (const ch of ['W', 'A', 'M']) { const gc = glyphCanvas(ch, '#ffffff'); mg.imageSmoothingEnabled = false; mg.drawImage(gc, x, 4, gc.width * S, 11 * S); x += gc.width * S + 2; gems.push([x + S, 4 + 11 * S - S * 2]); x += S * 3 + 2; }
+  const d = mg.getImageData(0, 0, W, H).data, M = (x, y) => x >= 0 && y >= 0 && x < W && y < H && d[(y * W + x) * 4 + 3] > 128;
+  const B4 = [0, .5, .75, .25], put = (x, y, col) => { g.fillStyle = col; g.fillRect(x, y, 1, 1); };
+  const top = 4, bot = 4 + 11 * S;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    if (M(x, y)) {
+      const k = (y - top) / (bot - top), th = B4[(y & 1) * 2 + (x & 1)];
+      let col = k < .3 ? (k / .3 > th ? '#f4cc5c' : '#ffe9a0') : k < .65 ? ((k - .3) / .35 > th ? '#c8902e' : '#f4cc5c') : ((k - .65) / .35 > th ? '#7a4a1a' : '#c8902e');
+      if (!M(x - 1, y) || !M(x, y - 1)) col = '#fff6d8';                   // upper-left bevel light
+      else if (!M(x + 1, y) || !M(x, y + 1)) col = '#5a3410';              // lower-right shade
+      else if (S >= 3 && (!M(x - 2, y) || !M(x, y - 2)) && k < .6) col = '#ffe9a0'; // inner highlight
+      put(x, y, col);
+    } else {
+      let n1 = false, n2 = false;
+      for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) if (M(x + i, y + j)) n1 = true;
+      if (!n1) for (let j = -2; j <= 2; j++) for (let i = -2; i <= 2; i++) if (M(x + i, y + j)) n2 = true;
+      if (n1) put(x, y, '#140e1c'); else if (n2) put(x, y, (x + y) & 1 ? '#3a3448' : '#4e4660');  // dark line + dithered stone rim
+    }
   }
-  if (out && !RM) for (let k = 0; k < 6; k++) { const t = (gtime * .6 + k / 6) % 1; ctx.globalAlpha = 1 - t; rect(Math.round(100 + k * 23 + Math.sin(k * 9 + gtime) * 6), Math.round(by + S * 9 - t * S * 10), 1, 1, COL.gold); } ctx.globalAlpha = 1;
+  // gem stops instead of square periods
+  gems.forEach(([gx, gy]) => { const r = Math.max(2, S); for (let j = -r - 1; j <= r + 1; j++) for (let i = -r - 1; i <= r + 1; i++) { const a = Math.abs(i) + Math.abs(j);
+    if (a === r + 1) put(gx + i, gy + j, '#140e1c'); else if (a <= r) put(gx + i, gy + j, a === r ? (i + j < 0 ? '#e0c0ff' : '#4a2a8a') : (i <= 0 && j <= 0 ? '#b48cff' : '#7a4ad0')); }
+    put(gx - 1, gy - 1, '#ffffff'); });
+  // sword underline: pommel, grip, crossguard, blade
+  const uy = bot + 7, x0 = 8, x1 = W - 8;
+  g.fillStyle = '#140e1c'; g.fillRect(x0 - 1, uy - 2, x1 - x0 + 2, 5);
+  g.fillStyle = '#d8dce8'; g.fillRect(x0 + 18, uy - 1, x1 - x0 - 22, 1); g.fillStyle = '#8a90a4'; g.fillRect(x0 + 18, uy, x1 - x0 - 22, 2);
+  g.fillStyle = '#d8dce8'; for (let k = 0; k < 3; k++) g.fillRect(x1 - 4 + k, uy - 1 + k, 1, 1);
+  g.fillStyle = '#6a4a28'; g.fillRect(x0 + 4, uy - 1, 9, 3); g.fillStyle = '#c8902e'; g.fillRect(x0, uy - 1, 4, 3); g.fillRect(x0 + 14, uy - 4, 3, 9);
+  g.fillStyle = '#ffe9a0'; g.fillRect(x0, uy - 1, 1, 1); g.fillRect(x0 + 14, uy - 4, 1, 1);
+  return { c, S, mask: M, W, H };
+}
+function bigTitle() {
+  const S = logoScale(); if (!S) return; // no room above the box: no logo rather than overlapping
+  if (!logoBuf || logoBuf.S !== S) logoBuf = buildLogo(S);
+  const L = logoBuf, band = OY, bob = RM ? 0 : Math.round(Math.sin(gtime * .9) * 1);
+  const x = Math.round(160 - L.W / 2), y = Math.round(-band / 2 - L.H / 2) + bob;
+  ctx.drawImage(L.c, x, y);
+  if (!RM) { // occasional glint: a thin diagonal light sweeps across the letters every ~6s
+    const ph = (gtime % 6.5) / 1.1; if (ph < 1) { const gx = Math.round(-10 + ph * (L.W + 20)); ctx.globalAlpha = .7;
+      for (let j = 0; j < L.H; j++) for (let i = 0; i < 2; i++) { const px = gx + i - j / 2 | 0; if (L.mask(px, j)) { ctx.fillStyle = '#ffffff'; ctx.fillRect(x + px, y + j, 1, 1); } } ctx.globalAlpha = 1; } }
 }
 function drawCamp() {
   if (act4Ready() && !save.act4) { save.act4 = true; persist(); msgQueue.push({ title: 'A void opens', spr: 'shade', col: '#b480ff', lines: ['Your ' + TUNE.act4Perfects + ' perfect strikes tore the sky.', 'Secret Act IV: The Void is open.'] }); scene = 'msg'; return; }
   const sa = Math.floor(save.sel / 3);
   drawArena(ACTS[sa].c);
   bigTitle();
-  T('Perfect', 8, 6, COL.gold); T('' + save.perfects, 8, 18, COL.gold);
+  T('Perfect ' + save.perfects, 8, 10, COL.gold);
   btn(250, 6, 62, 16, save.mute ? 'Sound off' : 'Sound on', () => { save.mute = !save.mute; persist(); SFX.click(); }, { col: COL.dim });
   const showAct4 = save.cleared[8] || save.act4;
   for (let a = 0; a < (showAct4 ? 4 : 3); a++) {
@@ -2722,6 +2778,27 @@ function equip(it) {
   const old = c.gear[it.slot]; c.gear[it.slot] = it;
   save.inv = save.inv.filter(x => x !== it); if (old) save.inv.push(old);
   selItem = { it, eq: true }; SFX.drop(); persist();
+}
+// auto-equip: best usable bag item per slot; locked equipped items are never replaced
+function swapIn(it, id) {
+  const c = save.chars[id], old = c.gear[it.slot]; if (old && old.lock) return false;
+  c.gear[it.slot] = it; save.inv = save.inv.filter(x => x !== it);
+  if (old) { if (save.autoScrap && !old.lock) save.scrap += old.rar + 1; else save.inv.push(old); }
+  return true;
+}
+function equipBest() {
+  const id = save.cls || save.party[0], c = save.chars[id]; let n = 0;
+  for (const sl of SLOTS) {
+    const cur = c.gear[sl]; if (cur && cur.lock) continue;
+    const best = save.inv.filter(it => it.slot === sl && canUse(it, id)).sort((a, b) => itemScore(b) - itemScore(a))[0];
+    if (best && itemScore(best) > itemScore(cur) && swapIn(best, id)) n++;
+  }
+  selItem = null; if (n) SFX.drop(); else SFX.click(); persist(); return n;
+}
+function autoEquipDrop(it) {
+  if (!save.autoEquip) return false; const id = save.cls || save.party[0], cur = save.chars[id].gear[it.slot];
+  if (!canUse(it, id) || (cur && cur.lock) || itemScore(it) <= itemScore(cur)) return false;
+  save.inv.push(it); return swapIn(it, id);
 }
 function scrapItem(it) { if (it.lock) return; save.inv = save.inv.filter(x => x !== it); save.scrap += it.rar + 1; selItem = null; SFX.kill(); persist(); }
 function isWorse(it) { const users = save.party.filter(id => canUse(it, id)); return !it.lock && !users.some(id => itemScore(it) > itemScore(save.chars[id].gear[it.slot])); }
@@ -2790,9 +2867,12 @@ function drawGear() {
   T('Forge ' + save.scrap + '/' + TUNE.forgeCost, 8, 226, COL.white);
   bar(8, 239, 150, 3, save.scrap / TUNE.forgeCost, COL.gold);
   btn(232, 222, 80, 20, 'Craft', claimForge, { dis: save.scrap < TUNE.forgeCost, col: COL.gold });
-  btn(8, 250, 148, 22, 'Scrap all worse', scrapWorse, { dis: !save.inv.some(isWorse), col: COL.white });
-  btn(162, 250, 150, 22, 'Auto-scrap ' + (save.autoScrap ? 'on' : 'off'), () => { save.autoScrap = !save.autoScrap; persist(); SFX.click(); if (save.autoScrap) scrapWorse(); }, { col: save.autoScrap ? COL.green : COL.dim, sel: save.autoScrap });
-  T('never scraps equipped or locked', 312, 278, COL.dark, 1, 'r');
+  const cid = save.cls || save.party[0], canBest = SLOTS.some(sl => { const cur = save.chars[cid].gear[sl]; return !(cur && cur.lock) && save.inv.some(it => it.slot === sl && canUse(it, cid) && itemScore(it) > itemScore(cur)); });
+  btn(8, 248, 150, 18, 'Equip best', equipBest, { dis: !canBest, col: COL.gold });
+  btn(162, 248, 150, 18, 'Scrap all worse', scrapWorse, { dis: !save.inv.some(isWorse), col: COL.white });
+  btn(8, 270, 150, 18, 'Auto-equip ' + (save.autoEquip ? 'on' : 'off'), () => { save.autoEquip = !save.autoEquip; persist(); SFX.click(); if (save.autoEquip) equipBest(); }, { col: save.autoEquip ? COL.green : COL.dim, sel: save.autoEquip });
+  btn(162, 270, 150, 18, 'Auto-scrap ' + (save.autoScrap ? 'on' : 'off'), () => { save.autoScrap = !save.autoScrap; persist(); SFX.click(); if (save.autoScrap) scrapWorse(); }, { col: save.autoScrap ? COL.green : COL.dim, sel: save.autoScrap });
+  T('locked items are never touched', 312, 300, COL.dark, 1, 'r');
   backBtn();
 }
 // ---------- skills: a scrollable, zoomable rune constellation per character ----------
@@ -2889,19 +2969,24 @@ function drawSkills() {
   // tooltip in the game font
   T(charName(c) + '  Lv ' + c.lvl, 8, 28, COL.white, 1, 'l', '#000');
   bar(8, 40, 90, 2, c.xp / xpNeed(c.lvl), COL.blue);
-  panel(4, 224, 312, 64, '#2a2a32');
   const n = treeSel && Tr.by[treeSel];
   if (n) {
-    const S = nodeState(c, n), I = nodeInfo(c, n);
-    T(I.n, 12, 230, KINDCOL[n.k]); T(KINDN[n.k], 308, 230, COL.dim, 1, 'r');
-    I.d.slice(0, 3).forEach((l, i) => T(l, 12, 243 + i * 11, COL.white));
-    const foot = S === 'own' ? 'Unlocked' : S === 'seal' ? 'Sealed: another path was chosen' : S === 'pick' ? 'A fork: choose one path' : n.q ? reqText(n.q) : '';
-    if (S !== 'pick') T(foot, 308, 276, S === 'own' ? COL.green : S === 'seal' ? COL.dark : COL.gold, 1, 'r');
-    else btn(212, 266, 96, 18, 'Take this path', () => {
+    const S = nodeState(c, n), I = nodeInfo(c, n), PW = 312, IW = PW - 16;
+    const title = wrap(I.n, IW - textW(KINDN[n.k]) - 8), lines = wrap(I.d.join(' '), IW);
+    const foot = S === 'own' ? 'Unlocked' : S === 'seal' ? 'Sealed: another path was chosen' : S === 'pick' ? '' : n.q ? reqText(n.q) : '';
+    const footL = foot ? wrap(foot, IW) : [], rowH = S === 'pick' ? 24 : footL.length * 11 + 4;
+    const maxL = 9, shown = lines.slice(0, maxL), PH = 8 + title.length * 11 + 3 + shown.length * 11 + rowH + 4, PY = 288 - PH;
+    panel(4, PY, PW, PH, '#2a2a32');
+    title.forEach((l, i) => T(l, 12, PY + 6 + i * 11, KINDCOL[n.k])); T(KINDN[n.k], 308, PY + 6, COL.dim, 1, 'r');
+    let y = PY + 6 + title.length * 11 + 3;
+    shown.forEach(l => { T(l, 12, y, COL.white); y += 11; });
+    if (S !== 'pick') footL.forEach((l, i) => T(l, 308, y + 2 + i * 11, S === 'own' ? COL.green : S === 'seal' ? COL.dark : COL.gold, 1, 'r'));
+    else btn(308 - 110, y + 2, 110, 18, 'Take this path', () => {
       c.evo = n.evo; const E = EVO[n.evo]; SFX.lvl(); treeAnim.push({ id: n.id, t: 0 }); c.seen.push(n.id); persist();
       msgQueue.push({ title: E.n + '!', char: c, col: COL.gold, lines: ['The ' + CLS[c.id].n + ' evolved.', ...E.d] }); msgReturn = 'skills'; scene = 'msg';
     }, { col: COL.gold, border: COL.gold });
   } else {
+    panel(4, 224, 312, 64, '#2a2a32');
     T('Nodes light up with levels and bosses.', 12, 232, COL.dim);
     T('Each fork: pick one path for good.', 12, 245, COL.dim);
     T(TOUCH ? 'Drag to look, tap a node.' : 'Drag or scroll, click a node.', 12, 258, COL.dark);
@@ -2953,7 +3038,7 @@ function drawMsg() {
 const CLASSPICK = [
   { id: 'archer', tag: ['Draw, hold, loose.', 'Release on the ring.'] },
   { id: 'warrior', tag: ['Steel and nerve.', 'Strike on the gold.'] },
-  { id: 'mage', tag: ['Trace the runes.', 'Hit each glowing one.'] },
+  { id: 'mage', tag: ['Fill the vial.', 'Stop on the rune line.'] },
 ];
 let selHover = 'warrior';
 const _demoC = {};
@@ -2963,7 +3048,8 @@ function drawMechDemo(id, cx, cy, t) {
   else if (id === 'archer') { for (let k = 0; k <= 30; k++) { const u = k / 30; rect(Math.round(cx - 32 + u * 64), Math.round(cy + 4 - Math.sin(u * 2.7 + .2) * 8), 1, 1, '#2a3a24'); }
     const u = (t * .6) % 1.2, uu = Math.min(1, u), ax = Math.round(cx - 32 + uu * 64), ay = Math.round(cy + 4 - Math.sin(uu * 2.7 + .2) * 8); ringPx(cx + 20, Math.round(cy + 4 - Math.sin(.81 * 2.7 + .2) * 8), 4, '#7ee07e'); rect(ax - 5, ay, 6, 1, '#a0743a'); rect(ax + 1, ay - 1, 2, 3, '#d8dce8'); rect(ax - 6, ay - 1, 2, 1, '#5ac85a');
     for (let k = -8; k <= 8; k++) rect(cx - 38 + Math.round(k * k / 20), cy + k, 1, 1, '#b07a3a'); }
-  else { ringPx(cx, cy, 10, '#8a5ad8'); ringPx(cx, cy, 6, '#2e2244'); const a = t * 2.4; rect(Math.round(cx + Math.cos(a) * 10) - 1, Math.round(cy + Math.sin(a) * 10) - 1, 3, 3, '#d6a6ff'); for (const r of [.5, 2.6, 4.4]) rect(Math.round(cx + Math.cos(r) * 14) - 1, Math.round(cy + Math.sin(r) * 14) - 1, 3, 3, Math.floor(t * 3) % 2 ? '#ffffff' : '#b48cff'); }
+  else { const lvl = (t * .45) % 1.1, H = 22, b0 = cy + 11; for (let y = 0; y < H; y++) { const hw = y < 4 ? 2 : 6, yy = b0 - y; rect(cx - hw - 1, yy, 1, 1, '#140e1c'); rect(cx + hw + 1, yy, 1, 1, '#140e1c'); rect(cx - hw, yy, hw * 2 + 1, 1, y / H < lvl && y >= 0 ? (y / H > lvl - .06 ? '#e0b8ff' : '#7a3ad0') : '#120c1c'); }
+    rect(cx - 7, b0 + 1, 15, 1, '#c8902e'); rect(cx - 2, b0 - H - 2, 5, 3, '#6a4a2a'); const ly = Math.round(b0 - H * .7); rect(cx - 9, ly, 19, 1, Math.floor(t * 3) % 2 ? '#ffffff' : COL.gold); }
 }
 function drawSelect() {
   drawArena(); bigTitle();
@@ -2976,7 +3062,7 @@ function drawSelect() {
     drawChar(demoChar(P.id), x + 50 - 27, y + 36 - bob, 3, '', { seed: i });
     T(CLS[P.id].n, x + 50, y + 104, col, 1, 'c');
     drawMechDemo(P.id, x + 50, y + 136, RM ? 1 : gtime + i);
-    T(P.id === 'archer' ? 'bow draw' : P.id === 'mage' ? 'rune circle' : 'sword bar', x + 50, y + 156, COL.dim, 1, 'c');
+    T(P.id === 'archer' ? 'bow draw' : P.id === 'mage' ? 'mana vial' : 'sword bar', x + 50, y + 156, COL.dim, 1, 'c');
     wrap(P.tag.join(' '), 92).slice(0, 4).forEach((l, k) => T(l, x + 50, y + 170 + k * 11, COL.white, 1, 'c'));
     hit(x, y, w, h, () => { if (selHover === P.id) { chooseClass(P.id); SFX.lvl(); goto('camp'); } else { selHover = P.id; SFX.click(); } });
   });
@@ -3028,7 +3114,7 @@ function drawUnit(u, i) {
   if (u.guard) corners(x - 3, y - 3, w + 6, h + 6, COL.blue, 4);
   bar(u.x - 14, u.y - h - 8, 28, 3, u.hp / u.max, '#7ee07e');
   if (u.id === save.active) { const ty = u.y - h - 16 + (Math.floor(B.t * 3) % 2); rect(u.x - 3, ty, 7, 1, '#fff'); rect(u.x - 2, ty + 1, 5, 1, '#fff'); rect(u.x - 1, ty + 2, 3, 1, '#fff'); rect(u.x, ty + 3, 1, 1, '#fff'); }
-  hit(u.x - w / 2 - 4, u.y - h - 6, w + 8, h + 10, () => switchTo(i));
+  if (B.units.length > 1) hit(u.x - w / 2 - 4, u.y - h - 6, w + 8, h + 10, () => switchTo(i));
 }
 const unitCol = u => u.s.burn ? '#ff9a3a' : u.s.chill ? '#9fe6f4' : u.s.holy ? '#ffe070' : TINT[u.id];
 function drawProj(p) {
@@ -3072,7 +3158,7 @@ function drawFoe(f, i) {
     const bw = 46, byy = f.y - 228;
     if (B.boss.st === 'fight') { bar(f.x - bw / 2 - 20, f.y + 6, bw, 2, f.wind > 0 ? 1 : 1 - f.timer / f.per, f.wind > 0 ? '#ffffff' : '#7a3a3a', '#16161c'); if (f.wind > 0) T('!', f.x - 20 - bw / 2 - 8, f.y + 2, COL.red, 1, 'c', '#000'); }
     if (f.burnT > 0) rect(f.x + 8, f.y + 6, 3, 3, '#ff9a3a'); if (f.chill > 0) rect(f.x + 14, f.y + 6, 3, 3, '#9fe6f4');
-    hit(f.x - BW * f.sc * .45, f.y - BH * f.sc, BW * f.sc * .9, BH * f.sc + 4, () => { B.target = i; SFX.click(); });
+    hit(f.x - BW * f.sc * .45, f.y - BH * f.sc, BW * f.sc * .9, BH * f.sc + 4, () => { B.target = i; onJ(); });
     return;
   }
   if (f.wind > 0 && !RM && Math.floor(B.t * 30) % 3 === 0) { const [cx, cy] = foeCenter(f), an = rnd(Math.PI * 2); B.parts.push({ x: cx + Math.cos(an) * 26, y: cy + Math.sin(an) * 26, vx: -Math.cos(an) * 90, vy: -Math.sin(an) * 90, t: 0, life: .28, col: '#ff5a5a', s: 1, g: 0 }); }
@@ -3091,7 +3177,7 @@ function drawFoe(f, i) {
   if (f.burnT > 0) rect(f.x + f.ox + bw / 2 + 2, by, 3, 3, '#ff9a3a');
   if (f.chill > 0) rect(f.x + f.ox + bw / 2 + 2, by + 4, 3, 3, '#9fe6f4');
   if (i === B.target && !boss) corners(x - 4, y - 4, w + 8, h + 8, Math.floor(B.t * 4) % 2 ? COL.gold : '#b08a30', 4);
-  hit(x - 6, y - 12, w + 12, h + 16, () => { B.target = i; SFX.click(); });
+  hit(x - 6, y - 12, w + 12, h + 16, () => { B.target = i; onJ(); });
 }
 function drawFx(e) {
   const p = e.t / e.dur;
@@ -3142,12 +3228,12 @@ function drawHud() {
     if (u.dead) drawSpr('grave', x + 3, y + 4, 1, 'dim'); else drawChar(u.c, x + 4, y + 5, 1, '', { noCape: true, spr: u.spr });
     T('' + (i + 1), x + 21, y + 4, act ? COL.white : COL.dim);
     bar(x + 3, y + 18, 28, 2, u.hp / u.max, u.dead ? '#333' : '#7ee07e', '#1a1620');
-    hit(x, y, 34, 22, () => switchTo(i));
+    if (B.units.length > 1) hit(x, y, 34, 22, () => switchTo(i));
   });
   const au = activeUnit();
   if (au) T(charName(au.c), 312, 259, TINT[au.id], 1, 'r');
   drawTimingBar(au);
-  if (!TOUCH) { const m = mechOf(au); T(m === 'bow' ? 'hold J, let go on the ring   Esc menu' : m === 'rune' ? 'J on each glowing rune   Esc menu' : 'J strike   Esc menu', 160, 305, '#4a4452', 1, 'c'); }
+  if (!TOUCH) { const m = mechOf(au); T(m === 'bow' ? 'hold J, let go on the ring   Esc menu' : m === 'rune' ? 'J when the mana hits the line   Esc menu' : 'J strike   Esc menu', 160, 305, '#4a4452', 1, 'c'); }
 }
 const TINT = { warrior: '#ffd35a', archer: '#7ee07e', mage: '#b48cff' };
 function drawTimingBar(au) {
@@ -3309,7 +3395,8 @@ cv.addEventListener('pointerdown', e => {
     // inside the skill tree: wait for release so a drag pans instead of clicking
     if (scene === 'skills' && mouse.y >= TREE_CLIP[1] && mouse.y < TREE_CLIP[1] + TREE_CLIP[3] && (b.drag || b.y >= TREE_CLIP[1] && b.y < TREE_CLIP[1] + TREE_CLIP[3] - 30)) { dragPend = { fn: b.fn, x: mouse.x, y: mouse.y }; dragMoved = 0; treeDrag = { x: mouse.x, y: mouse.y }; return; }
     b.fn(); return; } }
-  if (scene === 'title') onJ();
+  // nothing under the pointer: a click or tap anywhere acts as J (strike / draw / cast, continue, next message)
+  if (scene === 'title' || scene === 'msg' || scene === 'battle') onJ();
 });
 cv.addEventListener('pointermove', e => {
   const m = toLogical(e); if (e.pointerType === 'mouse') mouse = m;
@@ -3346,6 +3433,7 @@ function loop(now) {
     if (scene === 'battle' && B) updateBattle(dt);
     UI = [];
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+    { const free = VH - LH, S = (scene === 'camp' || scene === 'select') ? logoScale() : 0; OY = S ? logoH(S) + 8 + Math.floor((free - logoH(S) - 8) / 2) : Math.floor(free / 2); }
     drawVoid();
     const qa = scene === 'battle' && B ? B.quake * (RM ? .25 : 1) : 0;
     ctx.setTransform(1, 0, 0, 1, OX + (qa ? Math.round(rnd(-qa, qa)) : 0), OY + (qa ? Math.round(rnd(-qa, qa)) : 0));
@@ -3416,32 +3504,53 @@ function drawAltBar(au, mech) {
     if (!ready && B.state === 'fight' && au && !B.drawing) bar(44, 300, 232, 1, 1 - B.cd / au.s.cd, '#3e6a2e', '#000');
     const [lx, ly] = bowPt(B.label ? B.label.x : .5); altLabel(lx, ly - 8);
   } else {
-    const cx = 160 + sh, cy = 286, R = 12, ang = t => t * Math.PI * 2 - Math.PI / 2, P = t => [Math.round(cx + Math.cos(ang(t)) * R), Math.round(cy + Math.sin(ang(t)) * R)];
-    const frost = bv === 'frost' && B.slowT > 0;
-    // arcane disc with dithered shade lit from the upper left
-    for (let y = -16; y <= 16; y++) for (let x = -16; x <= 16; x++) { const d = Math.hypot(x, y); if (d > 16.5) continue; const lit = (-x - y) / 23; rect(cx + x, cy + y, 1, 1, d > 15.5 ? (ready ? '#6a3ab0' : '#2a1a40') : d > 13.5 && d < 10.5 ? '#000' : ((x + y) & 1) && lit > .3 ? '#1e1430' : frost ? '#0e1a24' : '#0e0a16'); }
-    ringPx(cx, cy, 15, ready ? '#8a5ad8' : '#2e2244'); ringPx(cx, cy, 9, '#2e2244');
-    // good arc and perfect arc on the orbit
-    for (let t = B.zc - g / 2; t <= B.zc + g / 2; t += .01) { const [x, y] = P(t); rect(x - 1, y - 1, 2, 2, ready ? '#4a2a8a' : '#1e1630'); }
-    if (!hidden) for (let t = B.zc - p / 2; t <= B.zc + p / 2; t += .006) { const [x, y] = P(t); rect(x - 1, y - 1, 3, 3, ready ? (pulse > .6 ? '#ffe27a' : COL.gold) : '#5a4a20'); }
-    // 12 rune glyphs; the ones this cast needs glow, lit ones turn gold
-    const GL = [[1, 0, 1, 0, 1, 0, 1, 0, 1], [0, 1, 0, 1, 1, 1, 0, 1, 0], [1, 1, 0, 0, 1, 0, 0, 1, 1], [1, 0, 0, 1, 1, 0, 1, 0, 0], [0, 1, 1, 0, 1, 0, 1, 1, 0], [1, 1, 1, 0, 1, 0, 0, 1, 0]];
-    for (let i = 0; i < 12; i++) { const t = i / 12, a = ang(t), x = Math.round(cx + Math.cos(a) * 19), y = Math.round(cy + Math.sin(a) * 19); GL[i % 6].forEach((on, j) => on && rect(x - 1 + j % 3, y - 1 + Math.floor(j / 3), 1, 1, '#3a2a58')); }
-    B.runes.forEach((r, i) => {
-      const done = i < B.runeQ.length, cur = i === B.runeQ.length, a = ang(done || !cur ? r : B.zc), x = Math.round(cx + Math.cos(a) * 19), y = Math.round(cy + Math.sin(a) * 19);
-      const c = done ? COL.gold : cur ? (ready ? (pulse > .5 ? '#ffffff' : '#d6a6ff') : '#5a4a7a') : '#8a5ad8';
-      rect(x - 2, y - 2, 5, 5, '#000'); GL[(i * 2 + 1) % 6].forEach((on, j) => on && rect(x - 1 + j % 3, y - 1 + Math.floor(j / 3), 1, 1, c));
-      if (cur && ready && !RM) { ctx.globalAlpha = .3; ringPx(x, y, 4, '#d6a6ff'); ctx.globalAlpha = 1; }
+    // ---- mana vial: ornate glass on a gilded stand, arcane liquid rises toward the rune line ----
+    const cx = 160 + sh, top = 250, bot = 294, IH = bot - top, lv = t => Math.round(bot - t * IH), frost = bv === 'frost' && B.slowT > 0;
+    const halfW = y => y < top + 3 ? 4 : y < top + 7 ? 4 + (y - top - 3) * 2 : y > bot - 3 ? 11 - (y - bot + 3) * 2 : 12; // neck flares into a rounded body
+    // shelf shadow + stand
+    rect(cx - 18, 299, 36, 2, '#09080c'); rect(cx - 15, 296, 30, 3, '#6a4a1a'); rect(cx - 15, 296, 30, 1, '#c8902e'); rect(cx - 15, 296, 2, 1, '#ffe9a0'); rect(cx - 12, 299, 3, 2, '#6a4a1a'); rect(cx + 10, 299, 3, 2, '#6a4a1a');
+    // glass interior (dark), liquid, glass edge
+    const surf = B.mk, wave = RM ? 0 : 1;
+    for (let y = top - 4; y <= bot; y++) {
+      const hw = y < top ? 3 : halfW(y);
+      for (let x = -hw; x <= hw; x++) {
+        const sy = lv(surf) + (wave ? Math.round(Math.sin(B.t * 6 + x * .7) * (y > top ? 1 : 0)) : 0);
+        let col = ready ? '#120c1c' : '#0c0a10';
+        if (y >= sy && y > top - 1) { // dithered purple liquid lit from the upper left
+          const k = (y - sy) / Math.max(1, IH), d = ((x + y) & 1) ? .5 : 0, s2 = (x + hw) / (2 * hw);
+          col = frost ? (k + d * .3 < .35 ? '#9fe6f4' : '#3a7aa0') : y === sy ? '#e0b8ff' : s2 + d * .4 < .35 ? '#b47cff' : k + d * .3 > .6 ? '#4a1e8a' : '#7a3ad0';
+        }
+        if (Math.abs(x) === hw) col = Math.abs(x) === hw && x < 0 ? '#c8c0e0' : '#5a5070';
+        rect(cx + x, y, 1, 1, col);
+      }
+    }
+    // outline, glass highlight streak (upper left), gilded neck ring and cork
+    for (let y = top - 4; y <= bot; y++) { const hw = y < top ? 3 : halfW(y); rect(cx - hw - 1, y, 1, 1, '#140e1c'); rect(cx + hw + 1, y, 1, 1, '#140e1c'); }
+    rect(cx - 11, bot + 1, 23, 1, '#140e1c');
+    for (let y = top + 9; y < bot - 10; y++) if (y % 9 < 6) rect(cx - 9, y, 1, 1, '#f0ecff');
+    rect(cx - 5, top - 1, 11, 3, '#8a5a1a'); rect(cx - 5, top - 1, 11, 1, '#e8b84a'); rect(cx - 5, top - 1, 1, 1, '#fff3c0');
+    rect(cx - 3, top - 9, 7, 5, '#6a4a2a'); rect(cx - 3, top - 9, 7, 1, '#a0743a'); rect(cx - 3, top - 9, 1, 4, '#a0743a');
+    rect(cx - 1, top - 11, 3, 2, ready ? '#d6a6ff' : '#4a3a5a'); // gem on the cork
+    // bubbles rising through the liquid
+    if (!RM && surf > .05) for (let k = 0; k < 6; k++) { const ph = (B.t * (.6 + k * .13) + k * .37) % 1, by = Math.round(bot - 1 - ph * (bot - lv(surf) - 2)), bx = cx - 8 + ((k * 5) % 16) + Math.round(Math.sin(B.t * 3 + k) * 1); if (by > lv(surf) + 1) rect(bx, by, k % 3 ? 1 : 2, k % 3 ? 1 : 2, '#e0c8ff'); }
+    // the fill lines: good brackets outside the glass, shimmering perfect line across it
+    B.runes.forEach((r, idx) => {
+      const done = idx < B.runeQ.length, cur = idx === B.runeQ.length, z = cur ? B.zc : r, y = lv(z);
+      if (cur) {
+        const gy0 = lv(z + g / 2), gy1 = lv(z - g / 2), py0 = lv(z + p / 2), py1 = lv(z - p / 2);
+        for (const sx of [-1, 1]) { const x0 = cx + sx * 15; rect(sx < 0 ? x0 - 2 : x0, gy0, 3, gy1 - gy0 + 1, ready ? '#3a6a3a' : '#1a2a1a'); rect(sx < 0 ? x0 - 2 : x0, gy0, 3, 1, '#7ee07e'); rect(sx < 0 ? x0 - 2 : x0, gy1, 3, 1, '#7ee07e'); if (!hidden) rect(sx < 0 ? x0 - 3 : x0, py0, 4, Math.max(1, py1 - py0 + 1), ready ? COL.gold : '#5a4a20'); }
+        if (!hidden) for (let x = -12; x <= 12; x++) { const sh2 = RM ? 0 : (x + Math.floor(B.t * 14)) % 6 === 0; rect(cx + x, y, 1, 1, sh2 ? '#ffffff' : ready ? (pulse > .6 ? '#ffe27a' : COL.gold) : '#5a4a20'); }
+        if (!hidden && ready) { rune(cx - 20, y - 2, idx % 5, '#d6a6ff'); rune(cx + 18, y - 2, (idx + 2) % 5, '#d6a6ff'); }
+      } else for (let x = -12; x <= 12; x += 2) rect(cx + x, y, 1, 1, done ? COL.gold : '#8a5ad8');
     });
-    if (B.runes.length > 1) T(B.runeQ.length + '/' + B.runes.length, cx + 24, cy - 4, '#b48cff');
-    // the orbiting spark with a trail
-    if (!RM) for (let k = 1; k < 7; k++) { const [x, y] = P(B.mk - B.md * k * .012); ctx.globalAlpha = .5 - k * .07; rect(x, y, 1, 1, frost ? '#9fe6f4' : '#b48cff'); } ctx.globalAlpha = 1;
-    const [sx, sy] = P(B.mk); rect(sx - 1, sy - 1, 3, 3, ready ? (frost ? '#9fe6f4' : '#d6a6ff') : '#4a3a5a'); rect(sx, sy, 1, 1, '#ffffff');
-    if (bv === 'heat') for (let k = 0; k < 5; k++) { const on = k < B.heat, gl = B.heat >= 5 && !RM && Math.floor(B.t * 8) % 2; rect(cx - 50 + k * 6, cy + 10, 4, 3, on ? (gl ? '#fff3a8' : '#ff7a1a') : '#2a1a14'); }
-    if (frost) T('slow', cx - 46, cy - 4, '#9fe6f4');
-    if (B.flash) { const k = B.flash.t / .3, [fx, fy] = P(B.flash.x), c = B.flash.q === 'perfect' ? COL.gold : B.flash.q === 'good' ? COL.green : '#ff5a5a'; for (let i = 0; i < 10; i++) { const a = i * .63, r = (1 - k) * 12; rect(Math.round(fx + Math.cos(a) * r), Math.round(fy + Math.sin(a) * r), 2, 2, c); } if (B.flash.q === 'miss') { ctx.globalAlpha = k * .4; ringPx(cx, cy, 15, '#ff5a5a'); ctx.globalAlpha = 1; } }
-    if (!ready && B.state === 'fight' && au) { const k = 1 - B.cd / au.s.cd; for (let i = 0; i < 24 * k; i++) { const a = i / 24 * Math.PI * 2 - Math.PI / 2; rect(Math.round(cx + Math.cos(a) * 6), Math.round(cy + Math.sin(a) * 6), 1, 1, '#6a4a9a'); } }
-    altLabel(cx, cy - 22);
+    if (B.runes.length > 1) T(B.runeQ.length + '/' + B.runes.length, cx + 24, top + 2, '#b48cff');
+    // spill: liquid foams over the lip and drips down the glass
+    if (B.spill > 0 && !RM) { const k = 1 - B.spill / .6; for (let d = 0; d < 6; d++) { const sx = d % 2 ? 1 : -1, x = cx + sx * (4 + d), y = Math.round(top - 4 + k * (14 + d * 6)); rect(x, y, 1, 2, d % 3 ? '#b47cff' : '#e0b8ff'); } }
+    if (bv === 'heat') for (let k = 0; k < 5; k++) { const on = k < B.heat, gl = B.heat >= 5 && !RM && Math.floor(B.t * 8) % 2; rect(cx - 60 + k * 6, 296, 4, 3, on ? (gl ? '#fff3a8' : '#ff7a1a') : '#2a1a14'); }
+    if (frost) T('slow', cx - 56, 284, '#9fe6f4');
+    if (B.flash) { const k = B.flash.t / .3, fy = lv(B.flash.x), c = B.flash.q === 'perfect' ? COL.gold : B.flash.q === 'good' ? COL.green : '#ff5a5a'; for (let i = 0; i < 10; i++) { const a = i * .63, r = (1 - k) * 16; rect(Math.round(cx + Math.cos(a) * r), Math.round(fy + Math.sin(a) * r * .5), 2, 2, c); } }
+    if (!ready && B.state === 'fight' && au) bar(cx + 20, 292, 40, 1, 1 - B.cd / au.s.cd, '#6a4a9a', '#000');
+    altLabel(cx + 44, 276);
   }
   if (!TOUCH) { slotBox(14, 283, 18, 16, ready ? TINT[au.id] : null); T('J', 23, 286, ready ? COL.white : COL.dim, 1, 'c'); }
   if (B.streak >= 2) T('x' + B.streak, 306, 286, COL.gold, 1, 'r');

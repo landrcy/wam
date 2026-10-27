@@ -43,7 +43,7 @@ function drawUnit(u, i) {
   if (u.guard) corners(x - 3, y - 3, w + 6, h + 6, COL.blue, 4);
   bar(u.x - 14, u.y - h - 8, 28, 3, u.hp / u.max, '#7ee07e');
   if (u.id === save.active) { const ty = u.y - h - 16 + (Math.floor(B.t * 3) % 2); rect(u.x - 3, ty, 7, 1, '#fff'); rect(u.x - 2, ty + 1, 5, 1, '#fff'); rect(u.x - 1, ty + 2, 3, 1, '#fff'); rect(u.x, ty + 3, 1, 1, '#fff'); }
-  hit(u.x - w / 2 - 4, u.y - h - 6, w + 8, h + 10, () => switchTo(i));
+  if (B.units.length > 1) hit(u.x - w / 2 - 4, u.y - h - 6, w + 8, h + 10, () => switchTo(i));
 }
 const unitCol = u => u.s.burn ? '#ff9a3a' : u.s.chill ? '#9fe6f4' : u.s.holy ? '#ffe070' : TINT[u.id];
 function drawProj(p) {
@@ -87,7 +87,7 @@ function drawFoe(f, i) {
     const bw = 46, byy = f.y - 228;
     if (B.boss.st === 'fight') { bar(f.x - bw / 2 - 20, f.y + 6, bw, 2, f.wind > 0 ? 1 : 1 - f.timer / f.per, f.wind > 0 ? '#ffffff' : '#7a3a3a', '#16161c'); if (f.wind > 0) T('!', f.x - 20 - bw / 2 - 8, f.y + 2, COL.red, 1, 'c', '#000'); }
     if (f.burnT > 0) rect(f.x + 8, f.y + 6, 3, 3, '#ff9a3a'); if (f.chill > 0) rect(f.x + 14, f.y + 6, 3, 3, '#9fe6f4');
-    hit(f.x - BW * f.sc * .45, f.y - BH * f.sc, BW * f.sc * .9, BH * f.sc + 4, () => { B.target = i; SFX.click(); });
+    hit(f.x - BW * f.sc * .45, f.y - BH * f.sc, BW * f.sc * .9, BH * f.sc + 4, () => { B.target = i; onJ(); });
     return;
   }
   if (f.wind > 0 && !RM && Math.floor(B.t * 30) % 3 === 0) { const [cx, cy] = foeCenter(f), an = rnd(Math.PI * 2); B.parts.push({ x: cx + Math.cos(an) * 26, y: cy + Math.sin(an) * 26, vx: -Math.cos(an) * 90, vy: -Math.sin(an) * 90, t: 0, life: .28, col: '#ff5a5a', s: 1, g: 0 }); }
@@ -106,7 +106,7 @@ function drawFoe(f, i) {
   if (f.burnT > 0) rect(f.x + f.ox + bw / 2 + 2, by, 3, 3, '#ff9a3a');
   if (f.chill > 0) rect(f.x + f.ox + bw / 2 + 2, by + 4, 3, 3, '#9fe6f4');
   if (i === B.target && !boss) corners(x - 4, y - 4, w + 8, h + 8, Math.floor(B.t * 4) % 2 ? COL.gold : '#b08a30', 4);
-  hit(x - 6, y - 12, w + 12, h + 16, () => { B.target = i; SFX.click(); });
+  hit(x - 6, y - 12, w + 12, h + 16, () => { B.target = i; onJ(); });
 }
 function drawFx(e) {
   const p = e.t / e.dur;
@@ -157,12 +157,12 @@ function drawHud() {
     if (u.dead) drawSpr('grave', x + 3, y + 4, 1, 'dim'); else drawChar(u.c, x + 4, y + 5, 1, '', { noCape: true, spr: u.spr });
     T('' + (i + 1), x + 21, y + 4, act ? COL.white : COL.dim);
     bar(x + 3, y + 18, 28, 2, u.hp / u.max, u.dead ? '#333' : '#7ee07e', '#1a1620');
-    hit(x, y, 34, 22, () => switchTo(i));
+    if (B.units.length > 1) hit(x, y, 34, 22, () => switchTo(i));
   });
   const au = activeUnit();
   if (au) T(charName(au.c), 312, 259, TINT[au.id], 1, 'r');
   drawTimingBar(au);
-  if (!TOUCH) { const m = mechOf(au); T(m === 'bow' ? 'hold J, let go on the ring   Esc menu' : m === 'rune' ? 'J on each glowing rune   Esc menu' : 'J strike   Esc menu', 160, 305, '#4a4452', 1, 'c'); }
+  if (!TOUCH) { const m = mechOf(au); T(m === 'bow' ? 'hold J, let go on the ring   Esc menu' : m === 'rune' ? 'J when the mana hits the line   Esc menu' : 'J strike   Esc menu', 160, 305, '#4a4452', 1, 'c'); }
 }
 const TINT = { warrior: '#ffd35a', archer: '#7ee07e', mage: '#b48cff' };
 function drawTimingBar(au) {
@@ -324,7 +324,8 @@ cv.addEventListener('pointerdown', e => {
     // inside the skill tree: wait for release so a drag pans instead of clicking
     if (scene === 'skills' && mouse.y >= TREE_CLIP[1] && mouse.y < TREE_CLIP[1] + TREE_CLIP[3] && (b.drag || b.y >= TREE_CLIP[1] && b.y < TREE_CLIP[1] + TREE_CLIP[3] - 30)) { dragPend = { fn: b.fn, x: mouse.x, y: mouse.y }; dragMoved = 0; treeDrag = { x: mouse.x, y: mouse.y }; return; }
     b.fn(); return; } }
-  if (scene === 'title') onJ();
+  // nothing under the pointer: a click or tap anywhere acts as J (strike / draw / cast, continue, next message)
+  if (scene === 'title' || scene === 'msg' || scene === 'battle') onJ();
 });
 cv.addEventListener('pointermove', e => {
   const m = toLogical(e); if (e.pointerType === 'mouse') mouse = m;
@@ -361,6 +362,7 @@ function loop(now) {
     if (scene === 'battle' && B) updateBattle(dt);
     UI = [];
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+    { const free = VH - LH, S = (scene === 'camp' || scene === 'select') ? logoScale() : 0; OY = S ? logoH(S) + 8 + Math.floor((free - logoH(S) - 8) / 2) : Math.floor(free / 2); }
     drawVoid();
     const qa = scene === 'battle' && B ? B.quake * (RM ? .25 : 1) : 0;
     ctx.setTransform(1, 0, 0, 1, OX + (qa ? Math.round(rnd(-qa, qa)) : 0), OY + (qa ? Math.round(rnd(-qa, qa)) : 0));
@@ -431,32 +433,53 @@ function drawAltBar(au, mech) {
     if (!ready && B.state === 'fight' && au && !B.drawing) bar(44, 300, 232, 1, 1 - B.cd / au.s.cd, '#3e6a2e', '#000');
     const [lx, ly] = bowPt(B.label ? B.label.x : .5); altLabel(lx, ly - 8);
   } else {
-    const cx = 160 + sh, cy = 286, R = 12, ang = t => t * Math.PI * 2 - Math.PI / 2, P = t => [Math.round(cx + Math.cos(ang(t)) * R), Math.round(cy + Math.sin(ang(t)) * R)];
-    const frost = bv === 'frost' && B.slowT > 0;
-    // arcane disc with dithered shade lit from the upper left
-    for (let y = -16; y <= 16; y++) for (let x = -16; x <= 16; x++) { const d = Math.hypot(x, y); if (d > 16.5) continue; const lit = (-x - y) / 23; rect(cx + x, cy + y, 1, 1, d > 15.5 ? (ready ? '#6a3ab0' : '#2a1a40') : d > 13.5 && d < 10.5 ? '#000' : ((x + y) & 1) && lit > .3 ? '#1e1430' : frost ? '#0e1a24' : '#0e0a16'); }
-    ringPx(cx, cy, 15, ready ? '#8a5ad8' : '#2e2244'); ringPx(cx, cy, 9, '#2e2244');
-    // good arc and perfect arc on the orbit
-    for (let t = B.zc - g / 2; t <= B.zc + g / 2; t += .01) { const [x, y] = P(t); rect(x - 1, y - 1, 2, 2, ready ? '#4a2a8a' : '#1e1630'); }
-    if (!hidden) for (let t = B.zc - p / 2; t <= B.zc + p / 2; t += .006) { const [x, y] = P(t); rect(x - 1, y - 1, 3, 3, ready ? (pulse > .6 ? '#ffe27a' : COL.gold) : '#5a4a20'); }
-    // 12 rune glyphs; the ones this cast needs glow, lit ones turn gold
-    const GL = [[1, 0, 1, 0, 1, 0, 1, 0, 1], [0, 1, 0, 1, 1, 1, 0, 1, 0], [1, 1, 0, 0, 1, 0, 0, 1, 1], [1, 0, 0, 1, 1, 0, 1, 0, 0], [0, 1, 1, 0, 1, 0, 1, 1, 0], [1, 1, 1, 0, 1, 0, 0, 1, 0]];
-    for (let i = 0; i < 12; i++) { const t = i / 12, a = ang(t), x = Math.round(cx + Math.cos(a) * 19), y = Math.round(cy + Math.sin(a) * 19); GL[i % 6].forEach((on, j) => on && rect(x - 1 + j % 3, y - 1 + Math.floor(j / 3), 1, 1, '#3a2a58')); }
-    B.runes.forEach((r, i) => {
-      const done = i < B.runeQ.length, cur = i === B.runeQ.length, a = ang(done || !cur ? r : B.zc), x = Math.round(cx + Math.cos(a) * 19), y = Math.round(cy + Math.sin(a) * 19);
-      const c = done ? COL.gold : cur ? (ready ? (pulse > .5 ? '#ffffff' : '#d6a6ff') : '#5a4a7a') : '#8a5ad8';
-      rect(x - 2, y - 2, 5, 5, '#000'); GL[(i * 2 + 1) % 6].forEach((on, j) => on && rect(x - 1 + j % 3, y - 1 + Math.floor(j / 3), 1, 1, c));
-      if (cur && ready && !RM) { ctx.globalAlpha = .3; ringPx(x, y, 4, '#d6a6ff'); ctx.globalAlpha = 1; }
+    // ---- mana vial: ornate glass on a gilded stand, arcane liquid rises toward the rune line ----
+    const cx = 160 + sh, top = 250, bot = 294, IH = bot - top, lv = t => Math.round(bot - t * IH), frost = bv === 'frost' && B.slowT > 0;
+    const halfW = y => y < top + 3 ? 4 : y < top + 7 ? 4 + (y - top - 3) * 2 : y > bot - 3 ? 11 - (y - bot + 3) * 2 : 12; // neck flares into a rounded body
+    // shelf shadow + stand
+    rect(cx - 18, 299, 36, 2, '#09080c'); rect(cx - 15, 296, 30, 3, '#6a4a1a'); rect(cx - 15, 296, 30, 1, '#c8902e'); rect(cx - 15, 296, 2, 1, '#ffe9a0'); rect(cx - 12, 299, 3, 2, '#6a4a1a'); rect(cx + 10, 299, 3, 2, '#6a4a1a');
+    // glass interior (dark), liquid, glass edge
+    const surf = B.mk, wave = RM ? 0 : 1;
+    for (let y = top - 4; y <= bot; y++) {
+      const hw = y < top ? 3 : halfW(y);
+      for (let x = -hw; x <= hw; x++) {
+        const sy = lv(surf) + (wave ? Math.round(Math.sin(B.t * 6 + x * .7) * (y > top ? 1 : 0)) : 0);
+        let col = ready ? '#120c1c' : '#0c0a10';
+        if (y >= sy && y > top - 1) { // dithered purple liquid lit from the upper left
+          const k = (y - sy) / Math.max(1, IH), d = ((x + y) & 1) ? .5 : 0, s2 = (x + hw) / (2 * hw);
+          col = frost ? (k + d * .3 < .35 ? '#9fe6f4' : '#3a7aa0') : y === sy ? '#e0b8ff' : s2 + d * .4 < .35 ? '#b47cff' : k + d * .3 > .6 ? '#4a1e8a' : '#7a3ad0';
+        }
+        if (Math.abs(x) === hw) col = Math.abs(x) === hw && x < 0 ? '#c8c0e0' : '#5a5070';
+        rect(cx + x, y, 1, 1, col);
+      }
+    }
+    // outline, glass highlight streak (upper left), gilded neck ring and cork
+    for (let y = top - 4; y <= bot; y++) { const hw = y < top ? 3 : halfW(y); rect(cx - hw - 1, y, 1, 1, '#140e1c'); rect(cx + hw + 1, y, 1, 1, '#140e1c'); }
+    rect(cx - 11, bot + 1, 23, 1, '#140e1c');
+    for (let y = top + 9; y < bot - 10; y++) if (y % 9 < 6) rect(cx - 9, y, 1, 1, '#f0ecff');
+    rect(cx - 5, top - 1, 11, 3, '#8a5a1a'); rect(cx - 5, top - 1, 11, 1, '#e8b84a'); rect(cx - 5, top - 1, 1, 1, '#fff3c0');
+    rect(cx - 3, top - 9, 7, 5, '#6a4a2a'); rect(cx - 3, top - 9, 7, 1, '#a0743a'); rect(cx - 3, top - 9, 1, 4, '#a0743a');
+    rect(cx - 1, top - 11, 3, 2, ready ? '#d6a6ff' : '#4a3a5a'); // gem on the cork
+    // bubbles rising through the liquid
+    if (!RM && surf > .05) for (let k = 0; k < 6; k++) { const ph = (B.t * (.6 + k * .13) + k * .37) % 1, by = Math.round(bot - 1 - ph * (bot - lv(surf) - 2)), bx = cx - 8 + ((k * 5) % 16) + Math.round(Math.sin(B.t * 3 + k) * 1); if (by > lv(surf) + 1) rect(bx, by, k % 3 ? 1 : 2, k % 3 ? 1 : 2, '#e0c8ff'); }
+    // the fill lines: good brackets outside the glass, shimmering perfect line across it
+    B.runes.forEach((r, idx) => {
+      const done = idx < B.runeQ.length, cur = idx === B.runeQ.length, z = cur ? B.zc : r, y = lv(z);
+      if (cur) {
+        const gy0 = lv(z + g / 2), gy1 = lv(z - g / 2), py0 = lv(z + p / 2), py1 = lv(z - p / 2);
+        for (const sx of [-1, 1]) { const x0 = cx + sx * 15; rect(sx < 0 ? x0 - 2 : x0, gy0, 3, gy1 - gy0 + 1, ready ? '#3a6a3a' : '#1a2a1a'); rect(sx < 0 ? x0 - 2 : x0, gy0, 3, 1, '#7ee07e'); rect(sx < 0 ? x0 - 2 : x0, gy1, 3, 1, '#7ee07e'); if (!hidden) rect(sx < 0 ? x0 - 3 : x0, py0, 4, Math.max(1, py1 - py0 + 1), ready ? COL.gold : '#5a4a20'); }
+        if (!hidden) for (let x = -12; x <= 12; x++) { const sh2 = RM ? 0 : (x + Math.floor(B.t * 14)) % 6 === 0; rect(cx + x, y, 1, 1, sh2 ? '#ffffff' : ready ? (pulse > .6 ? '#ffe27a' : COL.gold) : '#5a4a20'); }
+        if (!hidden && ready) { rune(cx - 20, y - 2, idx % 5, '#d6a6ff'); rune(cx + 18, y - 2, (idx + 2) % 5, '#d6a6ff'); }
+      } else for (let x = -12; x <= 12; x += 2) rect(cx + x, y, 1, 1, done ? COL.gold : '#8a5ad8');
     });
-    if (B.runes.length > 1) T(B.runeQ.length + '/' + B.runes.length, cx + 24, cy - 4, '#b48cff');
-    // the orbiting spark with a trail
-    if (!RM) for (let k = 1; k < 7; k++) { const [x, y] = P(B.mk - B.md * k * .012); ctx.globalAlpha = .5 - k * .07; rect(x, y, 1, 1, frost ? '#9fe6f4' : '#b48cff'); } ctx.globalAlpha = 1;
-    const [sx, sy] = P(B.mk); rect(sx - 1, sy - 1, 3, 3, ready ? (frost ? '#9fe6f4' : '#d6a6ff') : '#4a3a5a'); rect(sx, sy, 1, 1, '#ffffff');
-    if (bv === 'heat') for (let k = 0; k < 5; k++) { const on = k < B.heat, gl = B.heat >= 5 && !RM && Math.floor(B.t * 8) % 2; rect(cx - 50 + k * 6, cy + 10, 4, 3, on ? (gl ? '#fff3a8' : '#ff7a1a') : '#2a1a14'); }
-    if (frost) T('slow', cx - 46, cy - 4, '#9fe6f4');
-    if (B.flash) { const k = B.flash.t / .3, [fx, fy] = P(B.flash.x), c = B.flash.q === 'perfect' ? COL.gold : B.flash.q === 'good' ? COL.green : '#ff5a5a'; for (let i = 0; i < 10; i++) { const a = i * .63, r = (1 - k) * 12; rect(Math.round(fx + Math.cos(a) * r), Math.round(fy + Math.sin(a) * r), 2, 2, c); } if (B.flash.q === 'miss') { ctx.globalAlpha = k * .4; ringPx(cx, cy, 15, '#ff5a5a'); ctx.globalAlpha = 1; } }
-    if (!ready && B.state === 'fight' && au) { const k = 1 - B.cd / au.s.cd; for (let i = 0; i < 24 * k; i++) { const a = i / 24 * Math.PI * 2 - Math.PI / 2; rect(Math.round(cx + Math.cos(a) * 6), Math.round(cy + Math.sin(a) * 6), 1, 1, '#6a4a9a'); } }
-    altLabel(cx, cy - 22);
+    if (B.runes.length > 1) T(B.runeQ.length + '/' + B.runes.length, cx + 24, top + 2, '#b48cff');
+    // spill: liquid foams over the lip and drips down the glass
+    if (B.spill > 0 && !RM) { const k = 1 - B.spill / .6; for (let d = 0; d < 6; d++) { const sx = d % 2 ? 1 : -1, x = cx + sx * (4 + d), y = Math.round(top - 4 + k * (14 + d * 6)); rect(x, y, 1, 2, d % 3 ? '#b47cff' : '#e0b8ff'); } }
+    if (bv === 'heat') for (let k = 0; k < 5; k++) { const on = k < B.heat, gl = B.heat >= 5 && !RM && Math.floor(B.t * 8) % 2; rect(cx - 60 + k * 6, 296, 4, 3, on ? (gl ? '#fff3a8' : '#ff7a1a') : '#2a1a14'); }
+    if (frost) T('slow', cx - 56, 284, '#9fe6f4');
+    if (B.flash) { const k = B.flash.t / .3, fy = lv(B.flash.x), c = B.flash.q === 'perfect' ? COL.gold : B.flash.q === 'good' ? COL.green : '#ff5a5a'; for (let i = 0; i < 10; i++) { const a = i * .63, r = (1 - k) * 16; rect(Math.round(cx + Math.cos(a) * r), Math.round(fy + Math.sin(a) * r * .5), 2, 2, c); } }
+    if (!ready && B.state === 'fight' && au) bar(cx + 20, 292, 40, 1, 1 - B.cd / au.s.cd, '#6a4a9a', '#000');
+    altLabel(cx + 44, 276);
   }
   if (!TOUCH) { slotBox(14, 283, 18, 16, ready ? TINT[au.id] : null); T('J', 23, 286, ready ? COL.white : COL.dim, 1, 'c'); }
   if (B.streak >= 2) T('x' + B.streak, 306, 286, COL.gold, 1, 'r');

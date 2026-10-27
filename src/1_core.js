@@ -85,6 +85,7 @@ function T(s, x, y, col = COL.white, sc = 1, align = 'l', shadow = null) {
   s = String(s);
   if (align === 'c') x -= Math.floor(textW(s, sc) / 2); else if (align === 'r') x -= textW(s, sc);
   x = Math.round(x); y = Math.round(y);
+  if (window.WAMTRACE && !shadow) WAMTRACE.push({ k: 't', s, x, y, w: textW(s, sc), h: 9 * sc, sc });
   if (shadow) T(s, x + sc, y + sc, shadow, sc, 'l');
   for (const ch of s) {
     if (ch === ' ') { x += 4 * sc; continue; }

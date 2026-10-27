@@ -80,7 +80,7 @@ function bdTorch(x, y, t) {
   ctx.fillStyle = '#ff7020'; ctx.fillRect(x - 1, y - 1, 3, 2); ctx.fillStyle = '#ffd060'; ctx.fillRect(x, y - 1 - Math.round(f * 2), 1, 2 + Math.round(f));
 }
 function drawBackdrop() {
-  const act = scene === 'battle' && B ? B.act : scene === 'camp' && typeof save !== 'undefined' && save ? Math.floor((save.sel || 0) / 3) : -1;
+  const act = scene === 'battle' && B ? B.act : scene !== 'title' && typeof save !== 'undefined' && save && save.started ? Math.floor((save.sel || 0) / 3) : 0;
   if (act < 0 || act > 3) return false;
   if (!bdCache || bdCache.act !== act || bdCache.W !== VW || bdCache.H !== VH) bdCache = bdBuild(act, VW, VH);
   const { c, S } = bdCache, t = RM ? 0 : gtime, P = BDP[act];

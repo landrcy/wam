@@ -41,14 +41,16 @@ function unitBar(u) { return u ? evoField(u.c, 'bar', null) : null; }
 const MECH = { warrior: 'sword', archer: 'bow', mage: 'rune' };
 const mechOf = u => u ? MECH[u.id] || 'sword' : 'sword';
 const circD = (a, b) => { const d = Math.abs(a - b) % 1; return Math.min(d, 1 - d); };
-function aimD() { const u = activeUnit(); return mechOf(u) === 'rune' ? circD(B.mk, B.zc) : Math.abs(B.mk - B.zc); }
+function aimD() { return Math.abs(B.mk - B.zc); }
 function newTarget() {
   const m = mechOf(activeUnit());
   if (m === 'bow') { B.zc = B.zBase = rnd(.45, .88); B.zc2 = B.zc > .66 ? B.zc - rnd(.2, .28) : Math.min(.96, B.zc + rnd(.16, .24)); B.drawing = false; B.tapMode = false; B.over = 0; B.mk = 0; B.md = 1; return; }
   if (m === 'rune') {
-    const n = Math.random() < .15 + .07 * B.act ? 3 : Math.random() < .35 ? 2 : 1; let a = B.mk + B.md * rnd(.15, .3); B.runes = [];
-    for (let i = 0; i < n; i++) { B.runes.push(((a % 1) + 1) % 1); a += B.md * rnd(.14, .2); }
-    B.runeQ = []; B.zc = B.zBase = B.runes[0]; return;
+    // mana vial: one or more fill lines, bottom to top; the liquid rises and must be stopped on each line in turn
+    const n = Math.random() < .12 + .06 * B.act ? 3 : Math.random() < .3 ? 2 : 1; B.runes = [];
+    let a = n === 1 ? rnd(.45, .85) : n === 2 ? rnd(.32, .5) : rnd(.26, .36);
+    for (let i = 0; i < n; i++) { B.runes.push(Math.min(.9, a)); a += rnd(.2, .26); }
+    B.runeQ = []; B.zc = B.zBase = B.runes[0]; B.mk = 0; B.md = 1; return;
   }
   B.zc = B.zBase = rnd(.18, .82); rerollBar();
 }
@@ -262,7 +264,8 @@ function killFoe(f) {
   if (f.T.boss || lastOne || Math.random() < TUNE.dropChance) {
     const it = makeItem(f.L + (Math.random() < .3 ? 1 : 0), null, pick(save.party), f.T.boss ? 1 : 0, f.T.boss ? .6 : .1 * B.act);
     const [dx0, dy0] = foeCenter(f);
-    if (save.autoScrap && isWorse(it)) { it.scrapped = true; save.scrap += it.rar + 1; setTimeout(() => B && num(dx0, dy0 - 30, 'scrapped +' + (it.rar + 1), COL.dim), 500); }
+    if (autoEquipDrop(it)) { it.equipped = true; setTimeout(() => { if (B) { num(dx0, dy0 - 30, 'equipped!', COL.gold); B.fx.push({ type: 'ring', x: B.units[0].x, y: B.units[0].y - 24, t: 0, dur: .45, col: COL.gold }); } }, 700); }
+    else if (save.autoScrap && isWorse(it)) { it.scrapped = true; save.scrap += it.rar + 1; setTimeout(() => B && num(dx0, dy0 - 30, 'scrapped +' + (it.rar + 1), COL.dim), 500); }
     else if (save.inv.length >= TUNE.invMax) { it.scrapped = true; save.scrap += it.rar + 1; num(dx0, f.y - 40, 'bag full +' + (it.rar + 1), COL.dim); }
     else if (save.autoScrap && isWorse(it)) { it.scrapped = true; save.scrap += it.rar + 1; num(dx0, f.y - 40, 'scrapped +' + (it.rar + 1), COL.dim); }
     else save.inv.push(it);
@@ -412,7 +415,13 @@ function updateBattle(dt) {
   if (mech === 'bow') {
     if (B.drawing) { B.mk += markerSpeed() * .8 * dt; if (B.mk >= 1.12) { B.mk = 1.12; B.over += dt; if (B.over > .45 && B.state === 'fight') { num(60, 270, 'overdrawn', '#ff6a6a'); bowRelease(); } } }
     else B.mk = Math.max(0, B.mk - dt * 4);
-  } else if (mech === 'rune') { B.mk = ((B.mk + B.md * markerSpeed() * .62 * dt) % 1 + 1) % 1; }
+  } else if (mech === 'rune') { // vial fills only when the hero is ready; later lines in a cast fill faster
+    if (B.cd <= 0) B.mk += B.md * markerSpeed() * .5 * (1 + .25 * B.runeQ.length) * dt;
+    if (B.mk < 0) { B.mk = 0; B.md = 1; }
+    B.spill = Math.max(0, (B.spill || 0) - dt);
+    if (B.state === 'fight' && B.cd <= 0 && B.mk > B.zc + zones().g / 2 + .06) { B.spill = .6; B.spillLv = B.mk; num(160, 244, 'spilled', '#ff6a6a'); strike(); newTarget(); }
+    if (B.mk > 1.05) B.mk = 0;
+  }
   else { B.mk += B.md * markerSpeed() * dt;
   if (B.mk > 1) { B.mk = 2 - B.mk; B.md = -1; } if (B.mk < 0) { B.mk = -B.mk; B.md = 1; } }
   if (B.state !== 'fight') return;
